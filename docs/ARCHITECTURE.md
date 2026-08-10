@@ -1,8 +1,16 @@
 # 架构与信任边界
 
-第一版是单机 Conversation Harness，不是在线平台。它把公开内容、确定性状态、会话连续性和生成式教学拆成边界清楚的组件。
+第一版有两个运行入口：无需安装的静态 Web Chatbot，以及面向开发者和连接器的本地 Node CLI Conversation Harness。它们共享 45/52、每日最多 3 项、三态判分和答案门规则，但使用各自适合的可信存储边界；当前不是多用户在线平台。
 
 ## 组件
+
+### `docs/`
+
+可直接由 GitHub Pages 托管的零构建静态应用。浏览器端 `content-only` Harness 负责聊天状态、每日任务和确定性进度；Dedicated Worker 从白名单中的固定题库 commit 读取题目，作答前只向主线程返回题干与选项，提交后才返回参考答案与解析。
+
+个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。刷新时只读恢复档案和派生进度，不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
+
+Web 入口不运行 Agent Host，也不要求 API Key。Digital Employee 在这一入口中提供员工身份、契约和 CI 归属，而不是被虚构成浏览器内模型运行时。
 
 ### `progress_engine/`
 
@@ -28,9 +36,9 @@
 8. 全部校验通过后，才调用进度引擎写入；
 9. 用 `0600` 不可变 revision 文件和原子 hard-link CAS 保存恢复点；同一 revision 只有一个发布者能成功。
 
-## 会话与渠道
+## CLI 会话与渠道
 
-CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来 Web、钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。
+CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。静态 Web 使用独立的浏览器存储 Adapter，不冒充具备服务端认证语义的渠道入口。
 
 Digital Employee `0.3.0` 的 Agent-native Host 是 one-shot。Harness 因此不依赖 Host session，而在每轮显式重新注入：
 
@@ -78,8 +86,9 @@ Harness 与 Workbench 在调用员工包前生成两份对象：
 ## 当前没有的能力
 
 - 多用户注册、登录、租户隔离和服务端数据库；
-- 云同步、Web/API 服务与运营后台；
-- Web、钉钉、飞书的正式 Adapter；
+- 云同步、服务端 API 与运营后台；
+- 钉钉、飞书的正式 Adapter；
+- 浏览器内生成式讲解或托管 Agent Host；
 - 托管 Agent Host 和线上模型凭证管理；
 - 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
 - Codex 可运行 Adapter（当前仅 probe-only）。

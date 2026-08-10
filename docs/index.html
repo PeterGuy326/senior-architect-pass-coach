@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#17213f">
+    <meta name="referrer" content="no-referrer">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests"
+    >
+    <meta
+      name="description"
+      content="系统架构设计师过线私教：无需安装，在浏览器里完成诊断、刷题和弱项复习。"
+    >
+    <title>架构过线私塾 · 浏览器私人老师</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%2317213f%22/%3E%3Crect%20x=%228%22%20y=%228%22%20width=%2248%22%20height=%2248%22%20fill=%22%23a33b2e%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2232%22%20fill=%22%23fffdf7%22%3E%E6%9E%B6%3C/text%3E%3C/svg%3E">
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="stylesheet" href="./assets/app.css">
+    <script type="module" src="./src/app.mjs"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#answer-input">跳到答题区</a>
+
+    <header class="masthead">
+      <div class="masthead__inner">
+        <a class="brand" href="./" aria-label="架构过线私塾首页">
+          <span class="brand__seal" aria-hidden="true">架</span>
+          <span>
+            <span class="brand__eyebrow">SYSTEM ARCHITECT · PASS COACH</span>
+            <span class="brand__name">架构过线私塾</span>
+          </span>
+        </a>
+        <p class="masthead__motto">夜读一卷，批注一题，稳稳过线。</p>
+        <nav class="masthead__nav" aria-label="页面导航">
+          <a href="#study-desk">开始复习</a>
+          <a href="./privacy.html">隐私说明</a>
+          <a
+            href="https://github.com/PeterGuy326/senior-architect-pass-coach"
+            rel="noreferrer"
+          >源代码</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page-shell" id="study-desk">
+      <aside class="study-rail" aria-label="今日复习概览">
+        <section class="ledger ledger--tasks" aria-labelledby="today-title">
+          <div class="ledger__heading">
+            <p class="folio">今日课签</p>
+            <span class="date-chip" id="today-date" aria-label="今天日期">今日</span>
+          </div>
+          <h2 id="today-title">三题以内，先补最该补的</h2>
+          <ol class="task-list" id="task-list">
+            <li data-task-state="current">
+              <span class="task-index">壹</span>
+              <span class="task-copy">建档后生成第一道诊断题</span>
+            </li>
+            <li>
+              <span class="task-index">贰</span>
+              <span class="task-copy">根据作答证据调整弱项</span>
+            </li>
+            <li>
+              <span class="task-index">叁</span>
+              <span class="task-copy">完成复测或收束今日任务</span>
+            </li>
+          </ol>
+          <p class="ledger__footnote" id="task-summary">尚未开始 · 每轮最多 3 项</p>
+        </section>
+
+        <section class="ledger ledger--score" aria-labelledby="score-title">
+          <p class="folio">过线坐标</p>
+          <h2 id="score-title">不追满分，先把确定性做出来</h2>
+          <div class="score-ruler" aria-label="45 分及格线，52 分安全目标">
+            <div class="score-ruler__track" aria-hidden="true">
+              <span class="score-ruler__pass"></span>
+              <span class="score-ruler__safe"></span>
+            </div>
+            <div class="score-ruler__labels">
+              <span><strong>45</strong>及格线</span>
+              <span><strong>52</strong>安全目标</span>
+            </div>
+          </div>
+          <p class="score-note">策略：高频考点优先，错题复测优先，猜对不算掌握。</p>
+        </section>
+
+        <section class="ledger ledger--progress" aria-labelledby="progress-title">
+          <div class="ledger__heading">
+            <p class="folio">掌握簿</p>
+            <span class="evidence-badge" id="evidence-badge">尚无证据</span>
+          </div>
+          <h2 id="progress-title">按真实作答更新</h2>
+          <div class="subject-list" id="subject-list">
+            <p class="empty-copy">建档并完成诊断后，这里才会出现你的强弱项。</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="coach-desk" aria-labelledby="coach-title">
+        <header class="coach-desk__header">
+          <div>
+            <p class="folio folio--light">本日夜读 · 综合客观题</p>
+            <h1 id="coach-title">你的过线私教</h1>
+          </div>
+          <div class="session-mark" aria-label="会话状态">
+            <span class="session-mark__dot" id="session-dot" aria-hidden="true"></span>
+            <span id="session-label">等待建档</span>
+          </div>
+        </header>
+
+        <div class="truth-strip" aria-label="运行方式说明">
+          <span>仅存此浏览器</span>
+          <span>固定公开题库版本</span>
+          <span>无模型 · 无 API Key</span>
+        </div>
+
+        <section class="chat-sheet" aria-label="私教对话">
+          <ol
+            class="chat-timeline"
+            id="chat-timeline"
+            aria-live="polite"
+            aria-relevant="additions text"
+          >
+            <li class="message message--coach">
+              <div class="message__byline">
+                <span class="teacher-chop" aria-hidden="true">师</span>
+                <span>过线私教</span>
+              </div>
+              <div class="message__paper">
+                <p>我现在还不知道你的学习进度，也不会猜。</p>
+                <p>先在这个浏览器里建一份私人档案，我会立即用综合客观题做一次短诊断，再把时间压到最值得补的地方。</p>
+                <button class="primary-action" id="create-profile" type="button">
+                  在本浏览器建档并开始诊断
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </li>
+          </ol>
+
+          <div class="option-panel" id="option-panel" hidden aria-label="题目选项"></div>
+
+          <form class="answer-composer" id="answer-form" aria-label="提交答案">
+            <fieldset class="confidence-switch" id="confidence-field" disabled>
+              <legend>这题有把握吗？</legend>
+              <label>
+                <input type="radio" name="confidence" value="unsure" checked>
+                <span>不确定 / 猜的</span>
+              </label>
+              <label>
+                <input type="radio" name="confidence" value="sure">
+                <span>确定</span>
+              </label>
+            </fieldset>
+            <div class="answer-row">
+              <label class="sr-only" for="answer-input">输入 A 到 H 中的选项</label>
+              <input
+                id="answer-input"
+                name="answer"
+                type="text"
+                maxlength="15"
+                autocomplete="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                inputmode="text"
+                placeholder="输入 A–H；多选可输入 AC 或 A,C"
+                aria-describedby="answer-hint answer-error"
+                disabled
+              >
+              <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
+            </div>
+            <p class="answer-hint" id="answer-hint">选答案前不会显示正确项和解析。</p>
+            <p class="form-error" id="answer-error" role="alert"></p>
+          </form>
+        </section>
+
+        <nav class="desk-tools" aria-label="学习工具">
+          <button type="button" data-command="progress">查看进度</button>
+          <button type="button" data-command="tasks">今日任务</button>
+          <button type="button" data-command="continue">继续下一题</button>
+          <span class="desk-tools__divider" aria-hidden="true"></span>
+          <button type="button" data-command="export">导出档案</button>
+          <button type="button" data-command="import">导入档案</button>
+          <button class="danger-action" type="button" data-command="clear">清除本机数据</button>
+          <input
+            class="sr-only"
+            id="import-file"
+            type="file"
+            accept="application/json,.json"
+            aria-label="选择要导入的私人档案 JSON 文件"
+          >
+        </nav>
+        <p class="app-status" id="app-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <aside class="source-rail" aria-label="资料与边界">
+        <section class="source-card">
+          <p class="folio">资料钉</p>
+          <h2>每一道题，都要有出处</h2>
+          <p>客观题来自公开复习仓库的固定审阅版本，不会随远端更新悄悄变化。</p>
+          <a
+            class="source-link"
+            href="https://github.com/PeterGuy326/senior-software-architect-review/tree/88f4bdc58e668ac887f2f06e152f69a1c129edd1"
+            rel="noreferrer"
+          >查看固定版本 <span aria-hidden="true">↗</span></a>
+          <code class="commit-slip">88f4bdc5…129edd1</code>
+        </section>
+
+        <section class="margin-note">
+          <p class="margin-note__title">本版边界</p>
+          <ul>
+            <li>只练综合知识客观题</li>
+            <li>不调用大模型</li>
+            <li>不要求任何 API Key</li>
+            <li>Digital Employee 只负责契约基础设施</li>
+          </ul>
+          <a href="./privacy.html">数据与隐私说明</a>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="site-footer">
+      <p>系统架构设计师过线私教 · 开源实践案例</p>
+      <p>目标不是漂亮分数，是有证据地稳过 45。</p>
+    </footer>
+
+    <noscript>
+      <p class="noscript-note">需要启用 JavaScript 才能在浏览器本地保存进度和完成练习。</p>
+    </noscript>
+  </body>
+</html>

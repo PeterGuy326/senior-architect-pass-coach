@@ -1,0 +1,712 @@
+/**
+ * Browser coach API
+ *
+ * createBrowserCoach({ store, worker, curriculum?, clock?, idFactory? }) returns:
+ * - restore()/loadExisting() load existing state without creating a profile
+ * - initialize(options)  create/load the browser-local authorized profile
+ * - start()              plan at most three tasks and issue the first question
+ * - answer()/submit()    grade and atomically commit one objective attempt
+ * - advance()/next()     move to the next task
+ * - getView()/status()   return the current public UI projection
+ * - subscribe(listener)  receive every view change
+ * - exportData()/importData()/clearData() manage browser-local learner data
+ * - close()              release Worker, IndexedDB and BroadcastChannel handles
+ */
+
+import { createIndexedDbStore } from "./indexeddb-store.mjs";
+import {
+  createBlankProgress,
+  createLocalProfile,
+  objectiveResult,
+  planDailyTasks,
+  progressSummary,
+} from "./progress-rules.mjs";
+
+export const WEB_HARNESS_STATES = Object.freeze({
+  READY: "ready",
+  LOADING: "loading",
+  AWAITING_ANSWER: "awaiting_answer",
+  EVALUATING: "evaluating",
+  FEEDBACK: "feedback",
+  COMPLETE: "complete",
+  ERROR: "error",
+});
+
+const CONFIDENCE = new Set(["guess", "unsure", "sure"]);
+const FORBIDDEN_PUBLIC_KEYS = new Set([
+  "answer", "correct_answer", "reference_answer", "explanation", "analysis", "feedback", "result",
+]);
+
+function clone(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
+function coachError(code, message) {
+  const value = new Error(message);
+  value.code = code;
+  return value;
+}
+
+function nowFrom(clock) {
+  const value = typeof clock === "function" ? clock() : clock?.now?.();
+  const instant = value || new Date().toISOString();
+  if (typeof instant !== "string" || Number.isNaN(Date.parse(instant))) {
+    throw coachError("INVALID_CLOCK", "clock 必须返回 ISO-8601 时间。");
+  }
+  return instant;
+}
+
+function defaultId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function safeError(error) {
+  return {
+    code: typeof error?.code === "string" ? error.code : "WEB_COACH_FAILED",
+    message: typeof error?.message === "string" && error.message.length <= 512
+      ? error.message
+      : "私人老师暂时无法继续，请重试。",
+  };
+}
+
+function assertNoAnswer(value) {
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    if (FORBIDDEN_PUBLIC_KEYS.has(key.toLowerCase())) {
+      throw coachError("ANSWER_GATE_VIOLATION", `作答前题面包含 ${key}。`);
+    }
+    assertNoAnswer(child);
+  }
+}
+
+function validateQuestion(rawQuestion, task) {
+  const question = clone(rawQuestion);
+  if (
+    !question ||
+    typeof question.item_id !== "string" ||
+    question.subject !== "comprehensive" ||
+    question.topic_id !== task.topic_id ||
+    typeof question.prompt !== "string" ||
+    !Array.isArray(question.options) ||
+    question.options.length < 2 ||
+    question.options.length > 8
+  ) {
+    throw coachError("INVALID_WORKER_QUESTION", "题库 Worker 返回了无效题面。");
+  }
+  assertNoAnswer(question);
+  return question;
+}
+
+function unwrapWorkerResponse(request, response) {
+  if (!response || typeof response !== "object" || response.id !== request.id) {
+    throw coachError("INVALID_WORKER_RESPONSE", "题库 Worker 响应与当前请求不匹配。");
+  }
+  if (response.ok === false) {
+    throw coachError(response.error?.code || "CONTENT_WORKER_FAILED", response.error?.message || "题库 Worker 执行失败。");
+  }
+  if (response.ok !== true) throw coachError("INVALID_WORKER_RESPONSE", "题库 Worker 响应缺少 ok 状态。");
+  return clone(response.result ?? response.payload);
+}
+
+async function requestWorker(worker, request, timeoutMs = 20_000) {
+  if (typeof worker === "function") return unwrapWorkerResponse(request, await worker(clone(request)));
+  if (typeof worker?.request === "function") return unwrapWorkerResponse(request, await worker.request(clone(request)));
+  if (!worker?.postMessage || !worker?.addEventListener) throw new TypeError("worker_request_or_postMessage_required");
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finish(() => reject(coachError("CONTENT_WORKER_TIMEOUT", "题库加载超时，请检查网络后重试。"))), timeoutMs);
+    const onMessage = (event) => {
+      if (event?.data?.id !== request.id) return;
+      finish(() => {
+        try { resolve(unwrapWorkerResponse(request, event.data)); } catch (error) { reject(error); }
+      });
+    };
+    const onError = () => finish(() => reject(coachError("CONTENT_WORKER_FAILED", "题库 Worker 异常退出。")));
+    const finish = (callback) => {
+      clearTimeout(timer);
+      worker.removeEventListener?.("message", onMessage);
+      worker.removeEventListener?.("error", onError);
+      callback();
+    };
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError);
+    worker.postMessage(clone(request));
+  });
+}
+
+function normalizeSubmission(value, options) {
+  let response = value;
+  let settings = options || {};
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "response")) {
+    response = value.response;
+    settings = value;
+  }
+  const confidence = settings.confidence || "unsure";
+  if (!CONFIDENCE.has(confidence)) throw coachError("INVALID_CONFIDENCE", "把握度必须是 guess、unsure 或 sure。");
+  if (
+    !(typeof response === "string" && response.trim()) &&
+    !(Array.isArray(response) && response.length > 0 && response.every((item) => typeof item === "string" && item.trim()))
+  ) {
+    throw coachError("INVALID_RESPONSE", "请选择至少一个有效选项。");
+  }
+  return {
+    response: Array.isArray(response) ? response.map((item) => item.trim()) : response.trim(),
+    confidence,
+    expectedRevision: settings.expectedRevision,
+    expectedItemId: settings.expectedItemId,
+  };
+}
+
+function validateGrade(raw, task, question, confidence) {
+  const grade = clone(raw?.grade || raw);
+  if (
+    !grade ||
+    grade.item_id !== question.item_id ||
+    grade.topic_id !== task.topic_id ||
+    grade.subject !== "comprehensive" ||
+    typeof grade.correct !== "boolean" ||
+    grade.score !== (grade.correct ? 1 : 0) ||
+    grade.max_score !== 1
+  ) {
+    throw coachError("INVALID_WORKER_GRADE", "题库 Worker 判定与当前题目不一致。");
+  }
+  const expected = objectiveResult({ correct: grade.correct, confidence });
+  if (grade.result !== expected) throw coachError("GRADE_RESULT_MISMATCH", "题库 Worker 三态判定不一致。");
+  return grade;
+}
+
+function sameContentRef(left, right) {
+  const keys = [
+    "schema_version",
+    "source_id",
+    "source_commit",
+    "relative_path",
+    "question_number",
+    "topic_id",
+    "subject",
+    "source_type",
+    "action",
+    "item_id",
+    "content_revision",
+  ];
+  return keys.every((key) => left?.[key] === right?.[key]);
+}
+
+function validateRestorableSession(session) {
+  if (
+    !session ||
+    session.schema_version !== "web-coach-session.v1" ||
+    !Array.isArray(session.tasks) ||
+    session.tasks.length < 1 ||
+    session.tasks.length > 3 ||
+    !Number.isSafeInteger(session.cursor) ||
+    session.cursor < 0 ||
+    session.cursor >= session.tasks.length ||
+    !["ready", "loading", "awaiting_answer", "feedback"].includes(session.state)
+  ) {
+    throw coachError("INVALID_ACTIVE_SESSION", "活动学习会话结构无效，已拒绝恢复。");
+  }
+  return session;
+}
+
+export class BrowserCoachHarness {
+  constructor({ store, worker, curriculum = null, curriculumLoader = null, clock, idFactory = defaultId, ownsWorker = false } = {}) {
+    if (!store?.initialize || !store?.commitAttempt) throw new TypeError("coach_store_required");
+    if (!worker) throw new TypeError("content_worker_required");
+    this.store = store;
+    this.worker = worker;
+    this.curriculum = curriculum;
+    this.curriculumLoader = curriculumLoader;
+    this.clock = clock;
+    this.idFactory = idFactory;
+    this.ownsWorker = ownsWorker;
+    this.listeners = new Set();
+    this.profile = null;
+    this.progress = null;
+    this.session = null;
+    this.question = null;
+    this.feedback = null;
+    this.state = WEB_HARNESS_STATES.READY;
+    this.message = "尚未读取本浏览器的学习进度。";
+    this.lastError = null;
+    this.requestCounter = 0;
+    this.unsubscribeStore = this.store.subscribe?.(() => {});
+  }
+
+  async initialize({ examDate = null, dailyMinutes = 45 } = {}) {
+    await this.#ensureCurriculum();
+    const now = nowFrom(this.clock);
+    const profile = createLocalProfile({
+      principalId: `local:${this.idFactory()}`,
+      examDate,
+      dailyMinutes,
+      now,
+    });
+    const initialized = await this.store.initialize({ profile, progress: createBlankProgress({ now }) });
+    this.profile = initialized.profile;
+    this.progress = initialized.progress;
+    this.session = null;
+    this.question = null;
+    this.feedback = null;
+    this.state = WEB_HARNESS_STATES.READY;
+    this.lastError = null;
+    const summary = progressSummary(this.progress);
+    this.message = initialized.created
+      ? "我还不知道你的当前进度。先做高频综合题诊断，建立真实证据；案例和论文暂时保持未测量。"
+      : (summary.knows_progress
+        ? `我只按本浏览器中的 ${summary.evidence_count} 条真实证据安排今天的任务。`
+        : "我仍不知道你的真实进度。先做诊断，不会编造掌握情况。");
+    return this.#emit();
+  }
+
+  async restore() {
+    const [profile, progress] = await Promise.all([
+      this.store.getProfile(),
+      this.store.getProgress(),
+    ]);
+    if (!profile && !progress) return null;
+    if (!profile || !progress) {
+      throw coachError("INCOMPLETE_LOCAL_STATE", "本浏览器的档案与进度不完整，已拒绝猜测或覆盖；请导入备份或清除后重建。");
+    }
+    if (
+      profile.schema_version !== "web-learner-profile.v1" ||
+      profile.authorization !== "local-browser-owner" ||
+      progress.schema_version !== "web-progress.v1"
+    ) {
+      throw coachError("INVALID_LOCAL_STATE", "本浏览器中的私人学习状态版本无效。");
+    }
+    this.profile = profile;
+    this.progress = progress;
+    this.session = null;
+    this.question = null;
+    this.feedback = null;
+    this.state = WEB_HARNESS_STATES.READY;
+    this.lastError = null;
+    const summary = progressSummary(progress);
+    this.message = summary.knows_progress
+      ? `已恢复本浏览器中的 ${summary.evidence_count} 条真实学习证据。`
+      : "已恢复本地档案，但我仍不知道你的真实水平；先做诊断。";
+    const active = await this.#getUniqueActiveSession();
+    if (active) return this.#restoreActiveSession(active);
+    return this.#emit();
+  }
+
+  loadExisting() {
+    return this.restore();
+  }
+
+  async start() {
+    await this.#ensureInitialized();
+    const active = await this.#getUniqueActiveSession();
+    if (active) {
+      if (!this.session || this.session.session_id !== active.session_id) {
+        await this.#restoreActiveSession(active);
+      }
+      if (this.state === WEB_HARNESS_STATES.AWAITING_ANSWER && this.question) return this.getView();
+      if (this.state === WEB_HARNESS_STATES.FEEDBACK) return this.advance();
+      if (this.state === WEB_HARNESS_STATES.READY) return this.#loadCurrentQuestion();
+      throw coachError("INVALID_HARNESS_TRANSITION", "现有活动会话暂时不能开始新一轮。");
+    }
+    const tasks = planDailyTasks({
+      profile: this.profile,
+      progress: this.progress,
+      curriculum: this.curriculum,
+      today: nowFrom(this.clock).slice(0, 10),
+    });
+    const now = nowFrom(this.clock);
+    const session = {
+      session_id: String(this.idFactory()),
+      schema_version: "web-coach-session.v1",
+      revision: 0,
+      state: tasks.length ? WEB_HARNESS_STATES.READY : WEB_HARNESS_STATES.COMPLETE,
+      tasks,
+      cursor: 0,
+      active_item_ref: null,
+      feedback: null,
+      created_at: now,
+      updated_at: now,
+    };
+    this.session = await this.store.putSession(session);
+    this.state = this.session.state;
+    this.question = null;
+    this.feedback = null;
+    if (!tasks.length) {
+      this.message = "当前没有可安全解析的综合知识任务。";
+      return this.#emit();
+    }
+    return this.#loadCurrentQuestion();
+  }
+
+  async answer(value, options = undefined) {
+    const submission = normalizeSubmission(value, options);
+    if (this.state !== WEB_HARNESS_STATES.AWAITING_ANSWER || !this.session || !this.question) {
+      throw coachError("INVALID_HARNESS_TRANSITION", "当前没有等待作答的题目。");
+    }
+    const expectedRevision = submission.expectedRevision ?? this.session.revision;
+    const expectedItemId = submission.expectedItemId ?? this.question.item_id;
+    if (expectedRevision !== this.session.revision || expectedItemId !== this.question.item_id) {
+      throw coachError("STALE_VIEW", "页面题目或版本已经过期，请刷新后继续。");
+    }
+    this.state = WEB_HARNESS_STATES.EVALUATING;
+    this.message = "正在使用固定答案键判定，本轮不会调用模型。";
+    this.#emit();
+    try {
+      const result = await this.#workerRequest("grade", {
+        contentRef: clone(this.session.active_item_ref.content_ref),
+        response: submission.response,
+        confidence: submission.confidence,
+      });
+      const task = this.session.tasks[this.session.cursor];
+      const grade = validateGrade(result, task, this.question, submission.confidence);
+      const now = nowFrom(this.clock);
+      const attempt = {
+        attempt_id: `objective:${this.session.session_id}:${this.session.cursor + 1}:${this.question.item_id}`,
+        item_id: this.question.item_id,
+        topic_id: task.topic_id,
+        subject: "comprehensive",
+        skill: "recognition",
+        score: grade.correct ? 1 : 0,
+        max_score: 1,
+        confidence: submission.confidence,
+        result: grade.result,
+        at: now,
+        source_ref: Array.isArray(grade.source_refs) ? grade.source_refs[0] : "public-review-repository",
+        content_revision: this.session.active_item_ref.content_ref?.content_revision || null,
+      };
+      const committed = await this.store.commitAttempt({
+        expectedRevision,
+        sessionId: this.session.session_id,
+        expectedItemId,
+        attempt,
+        feedback: {
+          item_id: grade.item_id,
+          result: grade.result,
+          correct: grade.correct,
+          source_refs: Array.isArray(grade.source_refs) ? grade.source_refs : [],
+        },
+      });
+      this.progress = committed.progress;
+      this.session = committed.session;
+      this.feedback = grade;
+      this.state = WEB_HARNESS_STATES.FEEDBACK;
+      this.lastError = null;
+      this.message = grade.result === "mastered"
+        ? "这题答对且把握明确，记为 mastered。"
+        : (grade.result === "needs_retest"
+          ? "答案正确但把握不足，记为 needs_retest，稍后再测。"
+          : "这题尚未掌握，已进入优先复习队列。");
+      return this.#emit();
+    } catch (error) {
+      return this.#fail(error);
+    }
+  }
+
+  submit(value, options) {
+    return this.answer(value, options);
+  }
+
+  async advance() {
+    if (this.state !== WEB_HARNESS_STATES.FEEDBACK || !this.session) {
+      throw coachError("INVALID_HARNESS_TRANSITION", "查看反馈后才能进入下一项任务。");
+    }
+    const cursor = this.session.cursor + 1;
+    const complete = cursor >= this.session.tasks.length;
+    const next = {
+      ...this.session,
+      cursor,
+      state: complete ? WEB_HARNESS_STATES.COMPLETE : WEB_HARNESS_STATES.READY,
+      active_item_ref: null,
+      feedback: null,
+      updated_at: nowFrom(this.clock),
+    };
+    this.session = await this.store.putSession(next, { expectedRevision: this.session.revision });
+    this.question = null;
+    this.feedback = null;
+    this.state = this.session.state;
+    if (complete) {
+      this.message = "今天最多 3 项已经完成。到此为止，留出精力稳定过线。";
+      return this.#emit();
+    }
+    return this.#loadCurrentQuestion();
+  }
+
+  async next() {
+    if (!this.session) return this.start();
+    if (this.state === WEB_HARNESS_STATES.FEEDBACK) return this.advance();
+    if (this.state === WEB_HARNESS_STATES.READY) return this.#loadCurrentQuestion();
+    throw coachError("INVALID_HARNESS_TRANSITION", `当前状态 ${this.state} 不能进入下一题。`);
+  }
+
+  async status() {
+    this.profile = await this.store.getProfile();
+    this.progress = await this.store.getProgress();
+    return this.getView();
+  }
+
+  getView() {
+    const summary = progressSummary(this.progress || createBlankProgress({ now: nowFrom(this.clock) }));
+    const task = this.session?.tasks?.[this.session.cursor] || null;
+    return clone({
+      state: this.state,
+      revision: this.session?.revision || 0,
+      sessionId: this.session?.session_id || null,
+      knowsProgress: summary.knows_progress,
+      scoreGoal: { passLine: summary.score_goal.pass_line, safetyTarget: summary.score_goal.safety_target },
+      subjects: summary.subjects,
+      unsupportedSubjects: summary.unsupported_subjects,
+      task,
+      question: [WEB_HARNESS_STATES.AWAITING_ANSWER, WEB_HARNESS_STATES.EVALUATING].includes(this.state)
+        ? this.question
+        : null,
+      feedback: this.state === WEB_HARNESS_STATES.FEEDBACK && this.feedback
+        ? { grade: this.feedback }
+        : null,
+      tasks: this.session?.tasks || [],
+      completedTasks: this.session?.cursor || 0,
+      totalTasks: this.session?.tasks?.length || 0,
+      message: this.message,
+      error: this.lastError,
+    });
+  }
+
+  subscribe(listener) {
+    if (typeof listener !== "function") throw new TypeError("listener_function_required");
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  exportData() {
+    return this.store.exportData({ now: nowFrom(this.clock) });
+  }
+
+  async importData(payload) {
+    await this.store.importData(payload);
+    this.profile = await this.store.getProfile();
+    this.progress = await this.store.getProgress();
+    this.session = null;
+    this.question = null;
+    this.feedback = null;
+    this.state = WEB_HARNESS_STATES.READY;
+    this.lastError = null;
+    this.message = "本地学习进度已导入；题库正文和答案没有写入导出文件。";
+    return this.#emit();
+  }
+
+  async clearData() {
+    await this.store.clear();
+    this.profile = null;
+    this.progress = null;
+    this.session = null;
+    this.question = null;
+    this.feedback = null;
+    this.state = WEB_HARNESS_STATES.READY;
+    this.lastError = null;
+    this.message = "已清除本浏览器中的私人学习数据。我现在不知道你的进度，重新开始会先诊断。";
+    return this.#emit();
+  }
+
+  close() {
+    this.unsubscribeStore?.();
+    this.listeners.clear();
+    if (this.ownsWorker) this.worker.terminate?.();
+    this.store.close?.();
+  }
+
+  async #getUniqueActiveSession() {
+    if (typeof this.store.getUniqueActiveSession === "function") {
+      return this.store.getUniqueActiveSession();
+    }
+    const sessions = typeof this.store.listSessions === "function" ? await this.store.listSessions() : [];
+    const active = sessions.filter((session) => ["ready", "loading", "awaiting_answer", "feedback"].includes(session.state));
+    if (active.length > 1) {
+      throw coachError("AMBIGUOUS_ACTIVE_SESSION", "本浏览器存在多个活动学习会话，已拒绝猜测要恢复哪一个。");
+    }
+    return active[0] || null;
+  }
+
+  async #restoreActiveSession(rawSession) {
+    const session = validateRestorableSession(clone(rawSession));
+    this.session = session;
+    this.question = null;
+    this.feedback = null;
+    this.lastError = null;
+    const task = session.tasks[session.cursor];
+
+    if (session.state === WEB_HARNESS_STATES.AWAITING_ANSWER) {
+      const storedRef = session.active_item_ref?.content_ref;
+      if (
+        !storedRef ||
+        session.active_item_ref.item_id !== storedRef.item_id ||
+        session.active_item_ref.topic_id !== task.topic_id
+      ) {
+        throw coachError("INVALID_ACTIVE_SESSION", "等待作答会话缺少受信内容引用。");
+      }
+      const restored = await this.#workerRequest("rehydrate", { contentRef: clone(storedRef) });
+      const question = validateQuestion(restored?.publicQuestion, task);
+      if (
+        !sameContentRef(restored?.contentRef, storedRef) ||
+        question.item_id !== session.active_item_ref.item_id
+      ) {
+        throw coachError("CONTENT_CHANGED", "恢复题目与保存的内容引用不一致，已拒绝继续判题。");
+      }
+      this.question = question;
+      this.state = WEB_HARNESS_STATES.AWAITING_ANSWER;
+      this.message = `${task.name || task.topic_id}：已恢复刷新前的同一道题，继续作答即可。`;
+      return this.#emit();
+    }
+
+    if (session.state === WEB_HARNESS_STATES.FEEDBACK) {
+      const cursor = session.cursor + 1;
+      const complete = cursor >= session.tasks.length;
+      const advanced = {
+        ...session,
+        cursor,
+        state: complete ? WEB_HARNESS_STATES.COMPLETE : WEB_HARNESS_STATES.READY,
+        active_item_ref: null,
+        feedback: null,
+        error: null,
+        updated_at: nowFrom(this.clock),
+      };
+      this.session = await this.store.putSession(advanced, { expectedRevision: session.revision });
+      this.state = this.session.state;
+      this.message = complete
+        ? "上题进度已经保存；答案正文未持久化，本轮现已安全完成。"
+        : "上题进度已经保存；答案正文未持久化，已安全进入下一项准备态。";
+      return this.#emit();
+    }
+
+    if (session.state === WEB_HARNESS_STATES.LOADING) {
+      const ready = {
+        ...session,
+        state: WEB_HARNESS_STATES.READY,
+        active_item_ref: null,
+        feedback: null,
+        error: null,
+        updated_at: nowFrom(this.clock),
+      };
+      this.session = await this.store.putSession(ready, { expectedRevision: session.revision });
+    }
+    this.state = WEB_HARNESS_STATES.READY;
+    this.message = "已恢复未完成的本地学习会话，继续后会重新加载当前公开题面。";
+    return this.#emit();
+  }
+
+  async #ensureInitialized() {
+    if (!this.profile || !this.progress) {
+      await this.initialize();
+      return;
+    }
+    await this.#ensureCurriculum();
+  }
+
+  async #ensureCurriculum() {
+    if (this.curriculum) return;
+    if (typeof this.curriculumLoader !== "function") throw coachError("CURRICULUM_REQUIRED", "缺少浏览器课程索引。");
+    this.curriculum = await this.curriculumLoader();
+  }
+
+  async #loadCurrentQuestion() {
+    const task = this.session.tasks[this.session.cursor];
+    const loading = {
+      ...this.session,
+      state: WEB_HARNESS_STATES.LOADING,
+      active_item_ref: null,
+      feedback: null,
+      updated_at: nowFrom(this.clock),
+    };
+    this.session = await this.store.putSession(loading, { expectedRevision: this.session.revision });
+    this.state = WEB_HARNESS_STATES.LOADING;
+    this.message = `正在从公开复习仓库加载第 ${this.session.cursor + 1}/${this.session.tasks.length} 项。`;
+    this.#emit();
+    try {
+      const usedItemIds = Object.values(this.progress?.topics || {})
+        .flatMap((topic) => topic?.mastery?.recognition?.attempted_items || [])
+        .slice(-5_000);
+      const result = await this.#workerRequest("issue", { task: clone(task), usedItemIds });
+      const question = validateQuestion(result?.publicQuestion, task);
+      if (!result?.contentRef || typeof result.contentRef !== "object") {
+        throw coachError("INVALID_CONTENT_REF", "题库 Worker 缺少可恢复内容引用。");
+      }
+      const awaiting = {
+        ...this.session,
+        state: WEB_HARNESS_STATES.AWAITING_ANSWER,
+        active_item_ref: {
+          item_id: question.item_id,
+          topic_id: question.topic_id,
+          content_ref: clone(result.contentRef),
+        },
+        updated_at: nowFrom(this.clock),
+      };
+      this.session = await this.store.putSession(awaiting, { expectedRevision: this.session.revision });
+      this.question = question;
+      this.feedback = null;
+      this.state = WEB_HARNESS_STATES.AWAITING_ANSWER;
+      this.lastError = null;
+      this.message = `${task.name || task.topic_id}：先独立作答，再看参考答案。`;
+      return this.#emit();
+    } catch (error) {
+      return this.#fail(error, true);
+    }
+  }
+
+  async #workerRequest(type, payload) {
+    const request = { id: `web-${++this.requestCounter}-${this.idFactory()}`, type, payload: clone(payload) };
+    return requestWorker(this.worker, request);
+  }
+
+  async #fail(reason, persist = false) {
+    this.lastError = safeError(reason);
+    this.state = WEB_HARNESS_STATES.ERROR;
+    this.message = this.lastError.message;
+    if (persist && this.session) {
+      const failed = {
+        ...this.session,
+        state: WEB_HARNESS_STATES.ERROR,
+        active_item_ref: null,
+        feedback: null,
+        error: this.lastError,
+        updated_at: nowFrom(this.clock),
+      };
+      try { this.session = await this.store.putSession(failed, { expectedRevision: this.session.revision }); } catch {}
+    }
+    this.#emit();
+    throw reason;
+  }
+
+  #emit() {
+    const view = this.getView();
+    for (const listener of this.listeners) listener(clone(view));
+    return view;
+  }
+}
+
+export function createBrowserCoach(options) {
+  return new BrowserCoachHarness(options);
+}
+
+export async function createWebCoachHarness({
+  workerUrl = new URL("./content-worker.mjs", import.meta.url),
+  store = createIndexedDbStore(),
+  curriculum,
+  curriculumUrl = new URL("../data/curriculum.json", import.meta.url),
+  fetchImpl = globalThis.fetch,
+  WorkerImpl = globalThis.Worker,
+  ...options
+} = {}) {
+  if (typeof WorkerImpl !== "function") throw coachError("WEB_WORKER_UNAVAILABLE", "此浏览器不支持题库 Worker。");
+  if (!curriculum && typeof fetchImpl !== "function") throw coachError("FETCH_UNAVAILABLE", "此浏览器无法加载课程索引。");
+  const worker = new WorkerImpl(workerUrl, { type: "module", name: "architect-coach-content" });
+  const curriculumLoader = curriculum ? null : async () => {
+    const response = await fetchImpl(curriculumUrl, { credentials: "omit", cache: "no-store" });
+    if (!response.ok) throw coachError("CURRICULUM_LOAD_FAILED", "课程索引加载失败。");
+    return response.json();
+  };
+  return createBrowserCoach({
+    store,
+    worker,
+    curriculum,
+    curriculumLoader,
+    ownsWorker: true,
+    ...options,
+  });
+}

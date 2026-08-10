@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#17213f">
+    <meta name="referrer" content="no-referrer">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'none'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests"
+    >
+    <meta name="description" content="架构过线私塾的本地数据、资料来源和产品边界说明。">
+    <title>数据与隐私说明 · 架构过线私塾</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%2317213f%22/%3E%3Crect%20x=%228%22%20y=%228%22%20width=%2248%22%20height=%2248%22%20fill=%22%23a33b2e%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2232%22%20fill=%22%23fffdf7%22%3E%E6%9E%B6%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./assets/app.css">
+  </head>
+  <body class="privacy-page">
+    <header class="masthead">
+      <div class="masthead__inner">
+        <a class="brand" href="./" aria-label="返回架构过线私塾">
+          <span class="brand__seal" aria-hidden="true">架</span>
+          <span>
+            <span class="brand__eyebrow">SYSTEM ARCHITECT · PASS COACH</span>
+            <span class="brand__name">架构过线私塾</span>
+          </span>
+        </a>
+        <p class="masthead__motto">私人档案，应该先讲清楚再落笔。</p>
+        <nav class="masthead__nav" aria-label="页面导航">
+          <a href="./">返回私教</a>
+          <a
+            href="https://github.com/PeterGuy326/senior-architect-pass-coach"
+            rel="noreferrer"
+          >源代码</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="privacy-shell">
+      <p class="folio">数据与边界 · 公开说明</p>
+      <h1>你的学习档案，只留在你的浏览器里</h1>
+      <p class="privacy-lead">
+        这个网页没有账号系统、服务器档案、广告脚本或行为遥测。它只有在你点击建档后，
+        才在当前浏览器保存复习状态。
+      </p>
+
+      <h2>保存什么</h2>
+      <ul>
+        <li>考试日期和每日学习时长等本地设置；</li>
+        <li>已完成的任务、作答结果、信心标记和弱项状态；</li>
+        <li>会话 revision 与当前题目标识，用来防止重复提交。</li>
+      </ul>
+      <p>
+        原始输入文本和参考答案不作为长期学习档案保存。网页使用浏览器站点存储；换浏览器、
+        换设备、使用无痕模式或清理网站数据后，原档案不会自动出现。
+      </p>
+
+      <h2>不会做什么</h2>
+      <ul>
+        <li>不调用大模型，不上传 API Key，也不要求你配置模型账号；</li>
+        <li>不接入第三方字体、统计、广告、客服或会话回放脚本；</li>
+        <li>不把你的作答、错题和学习进度写入公开仓库、Issue 或 Pull Request；</li>
+        <li>不根据缺失数据猜测进度——没有作答证据时，会明确说不知道。</li>
+      </ul>
+
+      <h2>题库从哪里来</h2>
+      <p>
+        综合客观题按需读取自公开仓库
+        <a
+          href="https://github.com/PeterGuy326/senior-software-architect-review/tree/88f4bdc58e668ac887f2f06e152f69a1c129edd1"
+          rel="noreferrer"
+        >PeterGuy326/senior-software-architect-review</a>
+        的固定提交 <code>88f4bdc58e668ac887f2f06e152f69a1c129edd1</code>。
+        固定 revision 可以避免题目在你不知情时随远端更新变化。请求由浏览器直接发往
+        <code>raw.githubusercontent.com</code>，GitHub 仍可能按照其服务规则看到常规网络访问元数据。
+      </p>
+
+      <h2>导出、导入和清除</h2>
+      <p>
+        “导出档案”会在本机生成一份 JSON 文件，不会自动上传。该文件包含私人学习记录，
+        请像保管错题本一样保管它。“导入档案”只读取你主动选择的 JSON 文件；导入前会校验格式。
+        “清除本机数据”会删除这个站点在当前浏览器里的私人档案，操作前会再次确认。
+      </p>
+
+      <h2>当前产品边界</h2>
+      <p>
+        这是可直接使用的 MVP，目前只覆盖系统架构设计师考试的综合知识客观题。
+        案例分析与论文训练尚未开放。Digital Employee 在本项目中是员工包契约和运行规范的基础设施，
+        不是一个隐藏的大模型聊天服务；网页的选题、判分和进度更新都是确定性的本地流程。
+      </p>
+      <p>
+        作答前不显示答案是一道教学体验门，不是防破解的安全边界。设备所有者仍能使用开发者工具
+        查看浏览器收到的外部题库文件或修改本地 IndexedDB；如果未来需要真正的答案保密、账号认证
+        或防篡改进度，就必须引入并明确披露服务端。
+      </p>
+      <p>
+        外部复习仓库目前未声明许可证（<code>NOASSERTION</code>）。本项目不把题库正文打包进网页，
+        本项目的 Apache-2.0 许可证也不覆盖这些外部资料。
+      </p>
+
+      <a class="privacy-back" href="./">← 回到私人老师</a>
+    </main>
+  </body>
+</html>

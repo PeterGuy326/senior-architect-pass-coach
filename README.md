@@ -1,20 +1,32 @@
 # 系统架构设计师过线私教
 
-一个独立、可移植的本地数字老师：记得你真实做过什么，优先补最可能拖到 45 分以下的短板，并把每日任务压缩到最多 3 项。目标是稳定过线，不追求无止境刷高分。
+一个打开网页就能使用的私人数字老师：记得你真实做过什么，优先补最可能拖到 45 分以下的短板，并把每日任务压缩到最多 3 项。目标是稳定过线，不追求无止境刷高分。
 
-> 当前状态：本地 Conversation Harness MVP。`content-only` 已支持连续对话、按进度选题、判分、写入进度与恢复会话；`agent-host` 可通过 Digital Employee 调用兼容的本地 Agent Host。多用户账号、云端同步和托管服务尚未实现。
+## 直接使用
+
+**[打开「架构过线私塾」](https://peterguy326.github.io/senior-architect-pass-coach/)**
+
+考生不需要下载仓库、不需要安装 Node/Python、不需要编译，也不需要登录或填写 API Key。第一次打开时，老师会明确说明它还不知道你的进度；点击一次即可在当前浏览器建档并开始诊断。以后刷新或再次打开，会从这个浏览器已有的真实作答证据继续。
+
+当前网页 MVP 先把最适合确定性闭环的**综合知识客观题**做好：每天最多 3 项，答对且明确“确定”才算掌握，猜对或不确定答对会进入复测。案例分析和论文会显示为“未测量”，不会假装已经支持。
+
+> 当前状态：零安装 Web Chatbot MVP 已可部署到 GitHub Pages；浏览器端 `content-only` Harness 支持连续对话、固定版本选题、判分、本地进度和刷新恢复。仓库同时保留面向开发者与未来连接器的 Node CLI Conversation Harness；`agent-host` 可通过 Digital Employee 调用兼容的本地 Agent Host。多用户账号、云端同步和托管模型尚未实现。
 
 本项目把两类公开能力组合起来：
 
-- [senior-software-architect-review](https://github.com/PeterGuy326/senior-software-architect-review) 提供公开复习资料，由使用者单独 clone；
+- [senior-software-architect-review](https://github.com/PeterGuy326/senior-software-architect-review) 提供公开复习资料；网页会从固定审阅 commit 直接读取，考生无需 clone；
 - [Digital Employee](https://github.com/fullstack-ai-infra/digital-employee) `0.3.0` 提供可移植员工包契约、静态校验与离线评测。
 
-复习资料和私人进度彼此分离。公开资料可以更新和共享；个人档案、作答记录、错题证据始终保存在操作系统的用户数据目录中。
+复习资料和私人进度彼此分离。网页端的个人档案与作答证据只保存在当前浏览器的 IndexedDB；CLI 端保存在操作系统的用户数据目录。两者默认都不上传。
 
-截至本项目建立时，上述复习资料仓库没有声明 LICENSE。本仓库因此不复制或再分发其中的题库、解析和范文，只接受用户自行提供的本地 clone。这里的 Apache-2.0 只覆盖本仓库代码和原创文档，不自动覆盖外部资料。详见 [来源说明](docs/PROVENANCE.md)。
+截至本项目建立时，上述复习资料仓库没有声明 LICENSE。本仓库因此不把其中的题库、解析和范文复制进网页、npm 包或测试；网页只在用户浏览器运行时从固定来源读取，CLI 则读取用户自行取得的 clone。这里的 Apache-2.0 只覆盖本仓库代码和原创文档，不自动覆盖外部资料。详见 [来源说明](docs/PROVENANCE.md)。
 
 ## 已经能做什么
 
+- 直接在浏览器聊天：输入“今天学什么”“查看进度”“继续”“出题”，或直接提交 A–H 单选/多选答案；
+- 从固定公开 commit 读取综合客观题，作答前只展示题干与选项，提交后才返回可信答案和解析；
+- 在浏览器本地原子保存档案、进度与无题文作答证据，支持刷新恢复、导出、导入和一键清除；
+- 明确显示 45 分过线线、52 分安全目标、每日最多 3 项，以及综合/案例/论文的已测量边界；
 - `setup`：在仓库外建立本地私人档案与授权上下文；
 - `status`：显示综合、案例、论文三科的真实证据状态；
 - `today`：按过线优先算法给出最多 3 个任务；
@@ -30,9 +42,9 @@
 
 旧的单轮 `run` 入口仍然关闭；连续对话统一走 `session` Harness。Digital Employee `0.3.0` 中 Codex 仍是 **probe-only**：可以探测兼容性，但 `agent-host` 会在模型运行前拒绝它。
 
-## 快速开始
+## 开发者与连接器本地运行
 
-需要 Node.js 20+ 和 Python 3。
+下面的安装步骤只用于开发、CLI 和未来钉钉/飞书连接器，不是考生使用网页的前置条件。需要 Node.js 20+ 和 Python 3。
 
 ```bash
 git clone https://github.com/PeterGuy326/senior-software-architect-review.git
@@ -103,7 +115,7 @@ npm run coach -- session start \
   --content-dir ../senior-software-architect-review
 ```
 
-Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，并重新注入当前题目和批准材料；CLI、未来 Web 和 IM 连接器因此能共享同一个会话事实来源。
+CLI Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，并重新注入当前题目和批准材料。当前零安装网页使用同一套教学规则的浏览器 `content-only` Adapter；未来 IM 连接器可以复用机器轮次契约。
 
 当前 `agent-host` 严格限制模型只能回显受信题面和本地判定，因此主要用于验证 one-shot Host 协议，并未把生成式讲解作为产品能力开放。可见教学反馈仍来自受信题库解析；后续会在不松动判分字段的前提下增加独立的 coaching text。
 
@@ -133,15 +145,14 @@ npm run coach -- validate-package --engine codex
 
 ```mermaid
 flowchart LR
-  A["CLI / 未来 Web 与 IM Adapter"] --> B["Conversation Harness"]
-  B --> C["本地题库选择器 + 密封答案键"]
-  B --> D["Digital Employee Host 或 content-only"]
-  D --> E["教学反馈与进度提议"]
-  C --> F["Trusted Grader"]
-  E --> G["Schema + 本地证据校验"]
-  F --> G
-  G -->|"通过"| H["确定性进度引擎"]
-  G -->|"拒绝"| I["不写状态"]
+  A["浏览器 Chatbot"] --> B["Web content-only Harness"]
+  B --> C["固定题库版本 + Worker 答案门"]
+  B --> D["IndexedDB 私人进度"]
+  E["CLI / 未来 IM Adapter"] --> F["Node Conversation Harness"]
+  F --> G["Digital Employee Host 或 content-only"]
+  C --> H["确定性判分"]
+  H --> D
+  G --> I["本地可信证据校验与进度引擎"]
 ```
 
 智能体永远只能“提议”。外层 Workbench 会先验证输出结构、授权范围和本地可信证据，再调用进度引擎写入。模型提供的用户身份、路径或“已经写入”声明一律不可信。

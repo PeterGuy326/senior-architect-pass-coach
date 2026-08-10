@@ -16,7 +16,9 @@
 
 - 不复制或再分发其题库、答案解析、论文范文和其他正文；
 - 不把外部内容打进 npm 包、员工包 assets 或测试 fixture；
-- 只允许用户通过 `--content-dir` 指向自己取得的本地 clone；
+- Web 入口只允许浏览器从 `docs/data/content-source.json` 白名单中的固定 commit 和七份综合卷读取，不使用可漂移分支或 GitHub API，也不把外部题库写进 Cache Storage；
+- Web 入口把外部材料明确标记为 `NOASSERTION`，本项目许可证不覆盖它；题块只在 Worker 内存中解析，作答前主线程只得到当前题干与选项；
+- CLI 入口只允许用户通过 `--content-dir` 指向自己取得的本地 clone；
 - 运行时把材料标记为 `user-supplied-local-review-material`，题块摘要绑定本次会话；该标记不声称 CLI 已验证 Git origin 或 HEAD；
 - 作答前只抽取当前一道题的公开题面；提交后参考答案和解析会作为已展示反馈写入 owner-only 私人会话，显式 `agent-host` 模式也会把它们交给所选 Host，但它们不会写入本仓库或员工包；
 - 只维护独立创作的稳定考点索引和资源相对路径；
