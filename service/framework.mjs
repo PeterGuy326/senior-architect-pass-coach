@@ -63,7 +63,10 @@ export async function validateEmployeePackage({
       framework: "@fullstack-ai-infra/digital-employee@0.3.0",
     };
     if (engine) {
-      const host = await inspectEmployeeHostCompatibility({ directory, engine });
+      const host = await inspectEmployeeHostCompatibility({
+        directory: snapshot.directory,
+        engine,
+      });
       result.host = {
         engine,
         status: host.host.status,
@@ -85,7 +88,7 @@ export async function evaluateEmployeePackage({ directory = employeePackageDirec
 export function disabledRunEntry() {
   throw new CoachError(
     "RUN_NOT_ENABLED",
-    "当前版本只提供本地确定性 Workbench、静态校验和离线评测；尚未启用模型运行。",
+    "旧的单轮 run 入口已停用；请使用 session start --mode content-only，或显式选择兼容的 agent-host。",
     { exitCode: 3 },
   );
 }

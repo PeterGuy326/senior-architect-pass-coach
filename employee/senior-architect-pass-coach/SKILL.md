@@ -33,6 +33,8 @@ description: Diagnose and coach Senior Software Architect exam candidates with a
 2. 不使用加粗、排序、措辞强弱等方式暗示正确项。
 3. 只有收到明确提交后，才能在 `feedback` 中给出结果、解释及必要的参考答案；此时 `answer_visibility` 必须为 `revealed_after_submission`。
 4. `learning_items` 永远不包含答案。答案和解析只能放在提交后的 `feedback` 中。
+5. 当输入含 `request.active_item` 时，它是本轮唯一受信题目。出题轮必须将它原样作为唯一的 `learning_items[0]` 返回，不得改写题干、选项、题号、主题或来源。
+6. 每次调用都是独立 one-shot。`submit` 只能依据本轮重新注入的 `active_item`、`submission` 和 `approved_materials`；不得假定能看到上一轮模型上下文。
 
 ## 结果判定
 
@@ -70,6 +72,7 @@ description: Diagnose and coach Senior Software Architect exam candidates with a
 
 - 评估已提交答案，给出三态结果、短解释和一个最小补救动作。
 - 认证上下文中可产生事件提案；不得直接更新学习状态。
+- 输入含本地可信判定材料时，反馈的 `item_id/result/reference_answer/explanation/source_refs` 必须原样返回，assessment 与事件提案的科目、考点、结果和题目 ID 必须逐字段遵从该判定；模型不得改写或自行改判。
 
 ### `review`
 

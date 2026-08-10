@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/fullstack-ai-infra/digital-employee/v0.3.0/configs/employee-package.schema.json",
   "schemaVersion": "employee-package.v1alpha1",
   "name": "senior-architect-pass-coach",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A portable, read-only, pass-first private coach for China's Senior Software Architect exam, returning structured teaching results and authenticated progress-event proposals.",
   "license": "Apache-2.0",
   "authors": ["PeterGuy326"],
@@ -19,12 +19,13 @@
     "mode": "read_only",
     "network": "deny",
     "filesystem": {
-      "read": ["./knowledge/**"],
+      "read": ["./knowledge/**", "./presentation.json"],
       "write": []
     },
     "mcpTools": []
   },
   "assets": [
+    "./presentation.json",
     "./knowledge/README.md",
     "./knowledge/sources.json",
     "./evals/cases.json"

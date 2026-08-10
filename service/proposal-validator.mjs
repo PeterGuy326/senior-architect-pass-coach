@@ -29,6 +29,7 @@ const EVENT_TYPES = new Set([
 ]);
 const SUBJECTS = new Set(["comprehensive", "case", "essay"]);
 const RESULTS = new Set(["mastered", "not_mastered", "needs_retest"]);
+const PRE_SUBMISSION_ANSWER_MARKER = /(?:correct\s*answer|reference\s*answer|the\s+answer\s+is|(?:正确)?答案\s*(?:[:：]|是|为)|解析\s*[:：]|\[correct\]|[✓✔])/iu;
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -62,6 +63,22 @@ function array(value, label, maximum = 100) {
     throw new CoachError("INVALID_AGENT_PROPOSAL", `${label} 必须是长度不超过 ${maximum} 的数组。`);
   }
   return value;
+}
+
+function assertNoPrematureAnswer(value) {
+  if (typeof value === "string") {
+    if (PRE_SUBMISSION_ANSWER_MARKER.test(value)) {
+      throw new CoachError("ANSWER_GATE_VIOLATION", "考生提交前的自由文本中检测到答案或解析。 ");
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(assertNoPrematureAnswer);
+    return;
+  }
+  if (value && typeof value === "object") {
+    Object.values(value).forEach(assertNoPrematureAnswer);
+  }
 }
 
 function validateTeachingResult(value, expectedAction) {
@@ -115,6 +132,7 @@ function validateTeachingResult(value, expectedAction) {
   } else if (result.answer_visibility !== "hidden" || feedbackItems.length !== 0) {
     throw new CoachError("ANSWER_GATE_VIOLATION", "考生提交前必须隐藏答案和反馈。");
   }
+  if (result.answer_visibility === "hidden") assertNoPrematureAnswer(result);
   if (result.state_write_performed !== false) {
     throw new CoachError(
       "AGENT_CLAIMED_STATE_WRITE",

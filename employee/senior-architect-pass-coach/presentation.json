@@ -1,0 +1,12 @@
+{
+  "schema_version": "coach-package-presentation.v1",
+  "display_name": "系统架构设计师过线私教",
+  "short_description": "记住真实进度，优先强化高频弱项，以三科稳定过线为目标。",
+  "welcome": "我是你的系统架构设计师过线私教。先看真实证据，再用最少任务补最影响 45 分的缺口。",
+  "publisher": {
+    "name": "PeterGuy326",
+    "verification": "self_asserted"
+  },
+  "infrastructure_attribution": "Built on Digital Employee",
+  "avatar": null
+}

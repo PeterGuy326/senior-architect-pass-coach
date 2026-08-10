@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { LocalObjectiveContentProvider } from "../service/content-provider.mjs";
+import { TrustedObjectiveGrader } from "../service/trusted-grader.mjs";
 import { LocalCoachWorkbench } from "../service/workbench.mjs";
+
+const SYNTHETIC_PAPER = `### 1. 【题干】
+合成授权题应选择（ ）。
+A. 错误选项  B. 正确选项
+**答案：B**  |  **考点**：合成授权
+**解析**：正确选项来自本地密封答案键。
+`;
 
 function recommendation(index) {
   return {
@@ -115,6 +124,23 @@ test("anonymous preparation only permits a general diagnosis", async (t) => {
   );
 });
 
+test("approved material resource paths are rejected at the Workbench boundary", async (t) => {
+  const { workbench } = await fixture(t);
+  await assert.rejects(
+    workbench.prepareTeachingAction({
+      action: "diagnose",
+      payload: {
+        approved_materials: [{
+          source_id: "senior-software-architect-review",
+          locator: "/private/synthetic/questions.md#1",
+          excerpt: "synthetic",
+        }],
+      },
+    }),
+    (error) => error.code === "RESOURCE_PATH_LEAK",
+  );
+});
+
 test("a forged caller context cannot authorize a progress commit", async (t) => {
   const { workbench } = await fixture(t);
   await assert.rejects(
@@ -139,15 +165,29 @@ test("anonymous general diagnosis can be validated without a progress write", as
 });
 
 test("a validated proposal writes only the trusted local payload", async (t) => {
-  const { workbench, engine } = await fixture(t);
+  const { directory, workbench, engine } = await fixture(t);
   await workbench.setup();
   const context = await workbench.context({ required: true });
+  await mkdir(path.join(directory, "papers"));
+  await writeFile(path.join(directory, "papers", "synthetic.md"), SYNTHETIC_PAPER, "utf8");
+  const provider = new LocalObjectiveContentProvider({ contentDirectory: directory });
+  const issued = await provider.loadObjectiveQuestion({
+    relativePath: "papers/synthetic.md",
+    questionNumber: 1,
+    topicId: "K01",
+    eventType: "practice_result",
+  });
+  const graded = new TrustedObjectiveGrader({ principalId: context.user_id }).grade({
+    assessmentBundle: issued.assessmentBundle,
+    response: "A",
+    attemptKey: "workbench-capability-test",
+  });
   const output = validOutput({
     action: "submit",
     scope: "personalized",
     answerVisibility: "revealed_after_submission",
     feedback: [{
-      item_id: "q-001",
+      item_id: issued.publicQuestion.item_id,
       result: "not_mastered",
       explanation: "该题仍需复测",
       source_refs: [],
@@ -158,35 +198,27 @@ test("a validated proposal writes only the trusted local payload", async (t) => 
       subject: "comprehensive",
       topic_id: "K01",
       result: "not_mastered",
-      evidence: { item_id: "q-001", summary: "该题仍需复测" },
+      evidence: { item_id: issued.publicQuestion.item_id, summary: "该题仍需复测" },
       proposal_only: true,
       requires_authenticated_context: true,
     }],
   });
-  const trustedPayload = {
-    topic_id: "K01",
-    skill: "recognition",
-    score: 0,
-    max_score: 1,
-    attempt_id: "attempt-local-001",
-    item_id: "q-001",
-  };
+  await assert.rejects(
+    workbench.commitTeachingProposal({
+      output,
+      action: "submit",
+      trustedAuthorizations: [structuredClone(graded.authorization)],
+    }),
+    (error) => error.code === "UNTRUSTED_PROGRESS_AUTHORIZATION",
+  );
+  assert.deepEqual(engine.recordCalls, []);
   const result = await workbench.commitTeachingProposal({
     output,
     action: "submit",
-    trustedAuthorizations: [{
-      principal_id: context.user_id,
-      event_type: "practice_result",
-      subject: "comprehensive",
-      topic_id: "K01",
-      item_id: "q-001",
-      expected_result: "not_mastered",
-      command: "record",
-      payload: trustedPayload,
-    }],
+    trustedAuthorizations: [graded.authorization],
   });
   assert.equal(result.progress_commit.status, "committed");
-  assert.deepEqual(engine.recordCalls, [trustedPayload]);
+  assert.deepEqual(engine.recordCalls, [graded.authorization.payload]);
 });
 
 function validOutput({

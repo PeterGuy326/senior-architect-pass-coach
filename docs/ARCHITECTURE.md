@@ -1,6 +1,6 @@
 # 架构与信任边界
 
-第一版是单机 Workbench，不是在线平台。它把公开内容、确定性状态和生成式教学拆成三个边界清楚的组件。
+第一版是单机 Conversation Harness，不是在线平台。它把公开内容、确定性状态、会话连续性和生成式教学拆成边界清楚的组件。
 
 ## 组件
 
@@ -21,15 +21,44 @@
 1. 建立并校验本地授权上下文；
 2. 读取进度引擎 JSON，并只选择非身份字段；
 3. 把最多 3 项推荐组成去标识化快照；
-4. 校验员工包返回的结构化提议；
-5. 将提议与提交前保留的本地可信证据逐项匹配；
-6. 全部校验通过后，才调用进度引擎写入。
+4. 从用户提供的题库 clone 中按稳定考点选取客观题，并把答案密封在进程内；
+5. 用 Conversation Harness 保存 active item、控制答案门并重新注入 one-shot Host；
+6. 用本地 Trusted Grader 判分，校验员工包返回的反馈与提议；
+7. 将提议与模型不可见的授权逐项匹配；
+8. 全部校验通过后，才调用进度引擎写入；
+9. 用 `0600` 不可变 revision 文件和原子 hard-link CAS 保存恢复点；同一 revision 只有一个发布者能成功。
+
+## 会话与渠道
+
+CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来 Web、钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。
+
+Digital Employee `0.3.0` 的 Agent-native Host 是 one-shot。Harness 因此不依赖 Host session，而在每轮显式重新注入：
+
+- 当前题目的完整公开题面；
+- 本轮提交；
+- 有界的 `approved_materials`；
+- 去标识化进度快照。
+
+作答前的 Host 输出必须原样回显受信 active item。任何改写、答案标记、提前反馈或进度提议都会在发送给渠道前被拒绝。
+
+## 判题与中断
+
+作答前，客观题正确答案只存在于 Content Provider 的进程内密封 bundle。提交后，Trusted Grader 会把参考答案与解析作为本轮受信材料交给显式选择的 runner，并把已经展示的反馈写入 owner-only 私人会话；模型输出与受信判定任一关键字段不一致时不写进度。
+
+提交事务的最小阶段为：
+
+```text
+evaluation_started → commit_started → feedback
+                     ↘ indeterminate
+```
+
+一旦进度 commit 已开始，异常或崩溃会恢复为 `indeterminate`，禁止自动重答。对应机器收据会终结为 `TURN_RESULT_INDETERMINATE`；所有者核对本地进度后可以显式关闭并归档会话，但不能继续该轮。当前版本选择 fail-closed；以后只有进度引擎提供按 attempt ID 查询的确定性收据后，才可自动消解该状态。
 
 ## 三道门
 
 本项目采用通用推荐、授权、结果三态思想：
 
-- 推荐：确定性引擎决定“下一步最值得学什么”，生成式教师负责解释和反馈；
+- 推荐：确定性引擎决定“下一步最值得学什么”；当前可见反馈来自受信题库解析，Agent Host 只做协议一致性实验；
 - 授权：匿名只能通用诊断，个人状态需要本地授权；
 - 结果：智能体只能返回完成、需要补充或拒绝，不能声称已经改变状态。
 
@@ -37,10 +66,10 @@
 
 ## 提议提交协议
 
-Workbench 在调用员工包前生成两份对象：
+Harness 与 Workbench 在调用员工包前生成两份对象：
 
 - `input`：允许交给员工包的去标识化输入；
-- `trustedAuthorizations`：只留在本地外层的原始作答证据和允许执行的确定性命令。
+- `trustedAuthorizations`：只留在本地外层、由 Trusted Grader 产生的允许执行命令。渠道和调用者不能提供它。
 
 员工包返回后，外层先完整验证所有提议，再开始第一笔写入。若进程在多笔写入之间中断，稳定的 attempt/mock ID 保证重试不会制造重复证据。
 
@@ -50,8 +79,9 @@ Workbench 在调用员工包前生成两份对象：
 
 - 多用户注册、登录、租户隔离和服务端数据库；
 - 云同步、Web/API 服务与运营后台；
-- 长期运行的 Agent Host；
-- 线上模型调用与用户问题上传；
+- Web、钉钉、飞书的正式 Adapter；
+- 托管 Agent Host 和线上模型凭证管理；
+- 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
 - Codex 可运行 Adapter（当前仅 probe-only）。
 
 这些能力未来若实现，必须保留相同的默认拒绝和数据最小化边界。

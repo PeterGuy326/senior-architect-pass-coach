@@ -59,6 +59,8 @@ test("input contract is identity-free and matches the deidentified snapshot", as
     "recommendations",
   ]);
   assert.equal(snapshot.properties.recommendations.maxItems, 3);
+  assert.equal("answer" in schema.$defs.activeItem.properties, false);
+  assert.equal("reference_answer" in schema.$defs.activeItem.properties, false);
 });
 
 test("output contract is proposal-only with three assessment states", async () => {
@@ -88,7 +90,7 @@ test("output contract is proposal-only with three assessment states", async () =
   assert.equal("user_id" in schema.$defs.progressEventProposal.properties, false);
 });
 
-test("public source manifest pins one reference without embedding content", async () => {
+test("public source manifest records one reviewed reference without embedding content", async () => {
   const manifest = await readJson("knowledge/sources.json");
   assert.equal(manifest.schemaVersion, "public-source-manifest.v1");
   assert.equal(manifest.sources.length, 1);
@@ -96,7 +98,7 @@ test("public source manifest pins one reference without embedding content", asyn
     id: "senior-software-architect-review",
     kind: "public_git_repository",
     url: "https://github.com/PeterGuy326/senior-software-architect-review",
-    revision: "88f4bdc58e668ac887f2f06e152f69a1c129edd1",
+    reviewed_reference_revision: "88f4bdc58e668ac887f2f06e152f69a1c129edd1",
     visibility: "public",
     usage: "reference_only",
     contentIncluded: false,
@@ -152,6 +154,12 @@ test("portable schemas reject submission and answer leakage outside submit", asy
   const validateInput = ajv.compile(inputSchema);
   const validateOutput = ajv.compile(outputSchema);
   const practice = fixture.cases.find((item) => item.input.action === "practice");
+  const submit = fixture.cases.find((item) => item.input.action === "submit");
+
+  assert.equal(validateInput(submit.input), true, JSON.stringify(validateInput.errors));
+  const submitWithoutActiveItem = structuredClone(submit.input);
+  delete submitWithoutActiveItem.request.active_item;
+  assert.equal(validateInput(submitWithoutActiveItem), false);
 
   const inputWithEarlySubmission = structuredClone(practice.input);
   inputWithEarlySubmission.request.submission = {
