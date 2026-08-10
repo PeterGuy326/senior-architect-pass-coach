@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+*.log
+coverage/
+
+# 私人学习状态只能保存在操作系统用户数据目录，不应进入仓库。
+.study/
+.local-auth.json
+profile.json
+state.json
+state.json.bak
+attempts.jsonl
+dashboard.md
+.tutor.lock

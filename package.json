@@ -1,0 +1,26 @@
+{
+  "name": "senior-architect-pass-coach",
+  "version": "0.1.0",
+  "private": true,
+  "description": "系统架构设计师过线私教的本地 Workbench 与数字员工包",
+  "type": "module",
+  "bin": {
+    "architect-pass-coach": "service/cli.mjs"
+  },
+  "scripts": {
+    "coach": "node service/cli.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:python": "python3 -B -m unittest discover -s tests -p 'test_*.py'",
+    "employee:validate": "digital-employee validate ./employee/senior-architect-pass-coach --json",
+    "employee:eval": "digital-employee eval ./employee/senior-architect-pass-coach --json",
+    "check": "npm test && npm run test:python && npm run employee:validate && npm run employee:eval"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fullstack-ai-infra/digital-employee": "0.3.0",
+    "ajv": "8.20.0"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "public-source-manifest.v1",
+  "sources": [
+    {
+      "id": "senior-software-architect-review",
+      "kind": "public_git_repository",
+      "url": "https://github.com/PeterGuy326/senior-software-architect-review",
+      "revision": "88f4bdc58e668ac887f2f06e152f69a1c129edd1",
+      "visibility": "public",
+      "usage": "reference_only",
+      "contentIncluded": false
+    }
+  ]
+}

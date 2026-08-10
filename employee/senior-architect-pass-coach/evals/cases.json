@@ -1,0 +1,527 @@
+{
+  "schemaVersion": "employee-evals.v1alpha1",
+  "cases": [
+    {
+      "id": "anonymous-general-diagnose",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "diagnose",
+        "context": { "authenticated": false },
+        "request": {
+          "mode": "generate",
+          "diagnosis_scope": "general",
+          "count": 3
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "diagnose",
+          "status": "completed",
+          "scope": "general",
+          "summary": "A general diagnostic is ready; no personal progress was read, inferred, or changed.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [
+            {
+              "item_id": "diagnostic-comprehensive-1",
+              "kind": "diagnostic_question",
+              "subject": "comprehensive",
+              "topic_id": "architecture-basics",
+              "prompt": "Synthetic diagnostic: choose the option that best matches the stated architecture constraint.",
+              "options": [
+                { "label": "A", "text": "Option A" },
+                { "label": "B", "text": "Option B" }
+              ],
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "authenticated-status",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "status",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "progress_snapshot": {
+            "schema_version": "deidentified-progress.v1",
+            "subjects": {
+              "comprehensive": {
+                "status": "at_risk",
+                "latest_mock_score": 48,
+                "lower_bound_score": 44,
+                "evidence_level": "medium",
+                "evidence_count": 8
+              },
+              "case": {
+                "status": "unmeasured",
+                "latest_mock_score": null,
+                "lower_bound_score": null,
+                "evidence_level": "cold_start",
+                "evidence_count": 0
+              },
+              "essay": {
+                "status": "unmeasured",
+                "latest_mock_score": null,
+                "lower_bound_score": null,
+                "evidence_level": "cold_start",
+                "evidence_count": 0
+              }
+            },
+            "target_subject": "case",
+            "maintenance_subject": "comprehensive",
+            "crunch_mode": false,
+            "days_to_exam": 80,
+            "recommendations": []
+          }
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "status",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "The supplied snapshot shows comprehensive knowledge still lacks a safe lower bound and the other subjects need diagnosis.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "not_applicable",
+          "state_write_performed": false,
+          "assessments": [
+            {
+              "subject": "comprehensive",
+              "topic_id": "subject-baseline",
+              "result": "needs_retest",
+              "evidence": "The supplied conservative lower bound is below 45."
+            }
+          ],
+          "learning_items": [],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "today-three-item-cap",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "today",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "time_budget_minutes": 60,
+          "progress_snapshot": {
+            "schema_version": "deidentified-progress.v1",
+            "subjects": {
+              "comprehensive": {
+                "status": "at_risk",
+                "latest_mock_score": 48,
+                "lower_bound_score": 44,
+                "evidence_level": "medium",
+                "evidence_count": 8
+              },
+              "case": {
+                "status": "at_risk",
+                "latest_mock_score": 42,
+                "lower_bound_score": 38,
+                "evidence_level": "low",
+                "evidence_count": 2
+              },
+              "essay": {
+                "status": "unmeasured",
+                "latest_mock_score": null,
+                "lower_bound_score": null,
+                "evidence_level": "cold_start",
+                "evidence_count": 0
+              }
+            },
+            "target_subject": "case",
+            "maintenance_subject": "comprehensive",
+            "crunch_mode": false,
+            "days_to_exam": 80,
+            "recommendations": [
+              {
+                "topic_id": "case-quality",
+                "subject": "case",
+                "skill": "application",
+                "priority_score": 9.5,
+                "mastery": 0.2,
+                "review_due": true,
+                "estimated_minutes": 25,
+                "reason_code": "below_pass_line"
+              },
+              {
+                "topic_id": "architecture-patterns",
+                "subject": "comprehensive",
+                "skill": "recognition",
+                "priority_score": 8.1,
+                "mastery": 0.4,
+                "review_due": true,
+                "estimated_minutes": 20,
+                "reason_code": "safety_margin"
+              },
+              {
+                "topic_id": "essay-structure",
+                "subject": "essay",
+                "skill": "production",
+                "priority_score": 7.7,
+                "mastery": null,
+                "review_due": false,
+                "estimated_minutes": 15,
+                "reason_code": "cold_start"
+              }
+            ]
+          }
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "today",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "Today's pass-first plan contains three bounded tasks from the trusted recommendation snapshot.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "not_applicable",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [],
+          "feedback": [],
+          "recommendations": [
+            {
+              "id": "today-case",
+              "action": "case",
+              "subject": "case",
+              "topic_id": "case-quality",
+              "title": "Case quality drill",
+              "reason": "This subject is below the pass line.",
+              "minutes": 25
+            },
+            {
+              "id": "today-comprehensive",
+              "action": "practice",
+              "subject": "comprehensive",
+              "topic_id": "architecture-patterns",
+              "title": "Architecture pattern practice",
+              "reason": "The conservative score still lacks a safety margin.",
+              "minutes": 20
+            },
+            {
+              "id": "today-essay",
+              "action": "essay",
+              "subject": "essay",
+              "topic_id": "essay-structure",
+              "title": "Essay structure baseline",
+              "reason": "The subject has no evidence yet.",
+              "minutes": 15
+            }
+          ],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "practice-hides-answer",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "practice",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "subject": "comprehensive",
+          "topic_ids": ["availability"],
+          "count": 1
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "practice",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "One synthetic practice item is ready without its answer.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [
+            {
+              "item_id": "practice-availability-1",
+              "kind": "multiple_choice",
+              "subject": "comprehensive",
+              "topic_id": "availability",
+              "prompt": "Synthetic practice: choose the best option for the stated availability requirement.",
+              "options": [
+                { "label": "A", "text": "Option A" },
+                { "label": "B", "text": "Option B" }
+              ],
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "submit-proposes-event",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "submit",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "evaluate",
+          "subject": "comprehensive",
+          "topic_ids": ["availability"],
+          "submission": {
+            "item_id": "practice-availability-1",
+            "response": "A"
+          }
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "submit",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "The submitted response shows a gap that should be reviewed and retested.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "revealed_after_submission",
+          "state_write_performed": false,
+          "assessments": [
+            {
+              "subject": "comprehensive",
+              "topic_id": "availability",
+              "result": "not_mastered",
+              "evidence": "The submitted option did not match the synthetic fixture reference."
+            }
+          ],
+          "learning_items": [],
+          "feedback": [
+            {
+              "item_id": "practice-availability-1",
+              "result": "not_mastered",
+              "reference_answer": "B",
+              "explanation": "Review the requirement-to-tactic mapping, then take a different retest item.",
+              "source_refs": []
+            }
+          ],
+          "recommendations": [
+            {
+              "id": "review-availability",
+              "action": "review",
+              "subject": "comprehensive",
+              "topic_id": "availability",
+              "title": "Review availability tactics",
+              "reason": "The new submission provides direct evidence of a scoring gap.",
+              "minutes": 15
+            }
+          ],
+          "source_refs": []
+        },
+        "proposed_progress_events": [
+          {
+            "schema_version": "progress-event-proposal.v1",
+            "event_type": "practice_result",
+            "subject": "comprehensive",
+            "topic_id": "availability",
+            "result": "not_mastered",
+            "evidence": {
+              "item_id": "practice-availability-1",
+              "summary": "Authenticated submission was evaluated as not mastered."
+            },
+            "proposal_only": true,
+            "requires_authenticated_context": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "review-needs-retest",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "review",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "subject": "comprehensive",
+          "question_ids": ["practice-availability-1"]
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "review",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "A new retest prompt is ready; mastery is not inferred from review alone.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [
+            {
+              "subject": "comprehensive",
+              "topic_id": "availability",
+              "result": "needs_retest",
+              "evidence": "A fresh response is required before mastery can be decided."
+            }
+          ],
+          "learning_items": [
+            {
+              "item_id": "retest-availability-1",
+              "kind": "review_prompt",
+              "subject": "comprehensive",
+              "topic_id": "availability",
+              "prompt": "Synthetic retest: choose the best tactic for a different availability constraint.",
+              "options": [
+                { "label": "A", "text": "Option A" },
+                { "label": "B", "text": "Option B" }
+              ],
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "mock-generation",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "mock",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "subject": "comprehensive",
+          "time_budget_minutes": 30
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "mock",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "A short synthetic mock section is ready without answers.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [
+            {
+              "item_id": "mock-comprehensive-1",
+              "kind": "mock_section",
+              "subject": "comprehensive",
+              "topic_id": "architecture-patterns",
+              "prompt": "Complete the synthetic 30-minute mock section, then submit all responses together.",
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "case-generation",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "case",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "subject": "case",
+          "topic_ids": ["quality-attributes"]
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "case",
+          "status": "completed",
+          "scope": "personalized",
+          "summary": "A synthetic case task targets the weak area without revealing scoring points.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [
+            {
+              "item_id": "case-quality-1",
+              "kind": "case_task",
+              "subject": "case",
+              "topic_id": "quality-attributes",
+              "prompt": "Synthetic case: identify an architecture trade-off and justify the decision in a structured response.",
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    },
+    {
+      "id": "essay-generation",
+      "input": {
+        "schema_version": "architect-pass-coach-input.v1",
+        "action": "essay",
+        "context": { "authenticated": true },
+        "request": {
+          "mode": "generate",
+          "subject": "essay",
+          "topic_ids": ["essay-structure"],
+          "message": "Create an outline exercise without inventing project experience."
+        }
+      },
+      "expectedOutput": {
+        "teaching_result": {
+          "schema_version": "architect-pass-coach-teaching-result.v1",
+          "action": "essay",
+          "status": "needs_input",
+          "scope": "personalized",
+          "summary": "Real project facts are needed before a personalized essay outline can be evaluated.",
+          "score_goal": { "pass_line": 45, "safety_target": 52 },
+          "answer_visibility": "hidden",
+          "state_write_performed": false,
+          "assessments": [],
+          "learning_items": [
+            {
+              "item_id": "essay-structure-1",
+              "kind": "essay_task",
+              "subject": "essay",
+              "topic_id": "essay-structure",
+              "prompt": "List only real project context, your role, two constraints, one architecture decision, and its measurable outcome.",
+              "source_refs": []
+            }
+          ],
+          "feedback": [],
+          "recommendations": [],
+          "source_refs": []
+        },
+        "proposed_progress_events": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,527 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PeterGuy326/senior-architect-pass-coach/blob/main/employee/schemas/input.schema.json",
+  "title": "Senior Architect Pass Coach portable structured input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "action", "context", "request"],
+  "properties": {
+    "schema_version": {
+      "const": "architect-pass-coach-input.v1"
+    },
+    "action": {
+      "$ref": "#/$defs/action"
+    },
+    "context": {
+      "$ref": "#/$defs/context"
+    },
+    "request": {
+      "$ref": "#/$defs/request"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "authenticated": { "const": false }
+            },
+            "required": ["authenticated"]
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "diagnose" },
+          "request": {
+            "type": "object",
+            "required": ["diagnosis_scope"],
+            "properties": {
+              "diagnosis_scope": { "const": "general" }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": { "progress_snapshot": {} },
+                  "required": ["progress_snapshot"]
+                },
+                {
+                  "type": "object",
+                  "properties": { "submission": {} },
+                  "required": ["submission"]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "enum": ["status", "today", "practice", "submit", "review", "mock", "case", "essay"]
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "authenticated": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "diagnosis_scope": { "const": "personalized" }
+            },
+            "required": ["diagnosis_scope"]
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "properties": {
+              "authenticated": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "diagnose" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": { "diagnosis_scope": {} },
+            "required": ["diagnosis_scope"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "enum": ["status", "today"] }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": { "progress_snapshot": {} },
+            "required": ["progress_snapshot"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "submit" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": ["submission"],
+            "properties": {
+              "mode": { "const": "evaluate" },
+              "submission": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "enum": ["diagnose", "status", "today", "practice", "review", "mock", "case", "essay"]
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "mode": { "const": "generate" }
+            },
+            "not": {
+              "type": "object",
+              "properties": { "submission": {} },
+              "required": ["submission"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "practice" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "properties": {
+              "mode": { "const": "generate" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "case" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": ["subject"],
+            "properties": {
+              "subject": { "const": "case" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "action": { "const": "essay" }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "request": {
+            "type": "object",
+            "required": ["subject"],
+            "properties": {
+              "subject": { "const": "essay" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "action": {
+      "enum": ["diagnose", "status", "today", "practice", "submit", "review", "mock", "case", "essay"]
+    },
+    "subject": {
+      "enum": ["comprehensive", "case", "essay"]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authenticated"],
+      "properties": {
+        "authenticated": { "type": "boolean" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "enum": ["generate", "evaluate"]
+        },
+        "diagnosis_scope": {
+          "enum": ["general", "personalized"]
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "topic_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$",
+            "maxLength": 128
+          }
+        },
+        "question_ids": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "time_budget_minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 240
+        },
+        "days_to_exam": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3650
+        },
+        "progress_snapshot": {
+          "$ref": "#/$defs/progressSnapshot"
+        },
+        "submission": {
+          "$ref": "#/$defs/submission"
+        },
+        "approved_materials": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/approvedMaterial"
+          }
+        }
+      }
+    },
+    "progressSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "subjects",
+        "target_subject",
+        "maintenance_subject",
+        "crunch_mode",
+        "days_to_exam",
+        "recommendations"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "deidentified-progress.v1"
+        },
+        "subjects": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["comprehensive", "case", "essay"],
+          "properties": {
+            "comprehensive": { "$ref": "#/$defs/subjectProgress" },
+            "case": { "$ref": "#/$defs/subjectProgress" },
+            "essay": { "$ref": "#/$defs/subjectProgress" }
+          }
+        },
+        "target_subject": {
+          "oneOf": [
+            { "$ref": "#/$defs/subject" },
+            { "type": "null" }
+          ]
+        },
+        "maintenance_subject": {
+          "oneOf": [
+            { "$ref": "#/$defs/subject" },
+            { "type": "null" }
+          ]
+        },
+        "crunch_mode": {
+          "type": "boolean"
+        },
+        "days_to_exam": {
+          "type": ["integer", "null"]
+        },
+        "recommendations": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/snapshotRecommendation"
+          }
+        }
+      }
+    },
+    "subjectProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "latest_mock_score",
+        "lower_bound_score",
+        "evidence_level",
+        "evidence_count"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "latest_mock_score": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 75
+        },
+        "lower_bound_score": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 75
+        },
+        "evidence_level": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "snapshotRecommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topic_id",
+        "subject",
+        "skill",
+        "priority_score",
+        "mastery",
+        "review_due",
+        "estimated_minutes",
+        "reason_code"
+      ],
+      "properties": {
+        "topic_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "skill": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "priority_score": {
+          "type": ["number", "null"]
+        },
+        "mastery": {
+          "type": ["number", "null"]
+        },
+        "review_due": {
+          "type": "boolean"
+        },
+        "estimated_minutes": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_id", "response"],
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "response": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50000
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 20,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          ]
+        }
+      }
+    },
+    "approvedMaterial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "locator", "excerpt"],
+      "properties": {
+        "source_id": {
+          "const": "senior-software-architect-review"
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      }
+    }
+  }
+}
