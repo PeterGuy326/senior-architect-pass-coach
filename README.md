@@ -16,7 +16,7 @@
 
 如果你希望老师不仅判题，还能结合既往弱项追问、换一种方式解释和给出针对性的补救动作，可从 [Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载对应系统的 **Local Agent Runtime**：
 
-1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。
+1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. Runtime 会在 `127.0.0.1` 打开同一套私教页面；点击页面顶部“连接本机 Agent”。
 3. 从 Runtime 实际检查通过的引擎中选择一个。之后的可信判分先在浏览器本地完成，Agent 只负责个性化讲解。
 

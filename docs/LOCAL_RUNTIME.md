@@ -4,7 +4,7 @@ Local Agent Runtime 是“架构过线私教”的本机 Agent 执行层。它�
 
 ## 考生使用
 
-1. 从 [GitHub Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载系统对应的预览包。
+1. 从 [GitHub Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 解压并打开 `Senior Architect Pass Coach.app`；Linux x64（glibc 2.28+，不适用于 Alpine/musl）解压并运行 `start-local-coach`。
 3. 浏览器打开后，先建档或导入从 GitHub Pages 导出的档案。
 4. 点击页面顶部的“连接本机 Agent”，等待员工包级兼容性检查。
