@@ -5,6 +5,7 @@ import test from "node:test";
 import { createMemoryCoachStore } from "../docs/src/indexeddb-store.mjs";
 import { createBrowserCoach } from "../docs/src/harness.mjs";
 import {
+  DEFAULT_RUNTIME_ORIGIN,
   LOOPBACK_PROTOCOL,
   createLocalAgentClient,
   isLocalAgentRuntimeOrigin,
@@ -103,6 +104,38 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+function pairingWindow() {
+  const listeners = new Set();
+  const opened = [];
+  const popup = {
+    closed: false,
+    close() { this.closed = true; },
+  };
+  const windowRef = {
+    addEventListener(type, listener) {
+      assert.equal(type, "message");
+      listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      assert.equal(type, "message");
+      listeners.delete(listener);
+    },
+    open(url, name, features) {
+      opened.push({ url, name, features });
+      return popup;
+    },
+  };
+  return {
+    listeners,
+    opened,
+    popup,
+    windowRef,
+    dispatch(data, { origin = DEFAULT_RUNTIME_ORIGIN, source = popup } = {}) {
+      for (const listener of [...listeners]) listener({ data, origin, source });
+    },
+  };
+}
+
 test("only an exact 127.0.0.1 HTTP origin is eligible for the Agent Runtime", () => {
   assert.equal(isLocalAgentRuntimeOrigin("http://127.0.0.1:4317"), true);
   for (const origin of [
@@ -135,8 +168,102 @@ test("the client binds browser-native fetch to the global receiver", async () =>
   assert.deepEqual(receivers, [globalThis, globalThis]);
 });
 
+test("public-page pairing makes no Runtime fetch until an exact popup grant is accepted", async () => {
+  const token = "p".repeat(43);
+  const calls = [];
+  const browser = pairingWindow();
+  const client = createLocalAgentClient({
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse({
+        protocol: LOOPBACK_PROTOCOL,
+        adapters: [{ id: "claude-code", label: "Claude Code", state: "ready", selectable: true }],
+      });
+    },
+    idFactory: () => "pairing-state-1234567890-abcdefgh",
+  });
+
+  assert.equal(calls.length, 0);
+  const pending = client.pair({ windowRef: browser.windowRef, timeoutMs: 1_000 });
+  assert.equal(calls.length, 0);
+  assert.equal(browser.opened.length, 1);
+  const pairUrl = new URL(browser.opened[0].url);
+  const state = pairUrl.searchParams.get("state");
+  assert.equal(pairUrl.origin, DEFAULT_RUNTIME_ORIGIN);
+  assert.equal(pairUrl.pathname, "/pair.html");
+  assert.match(state, /^[A-Za-z0-9_-]{32,128}$/u);
+  assert.equal(pairUrl.href.includes(token), false);
+
+  const grant = {
+    type: "coach.runtime.grant",
+    protocol: LOOPBACK_PROTOCOL,
+    state,
+    access_token: token,
+    instance_id: "paired-runtime",
+  };
+  browser.dispatch(grant, { source: {} });
+  browser.dispatch(grant, { origin: "http://127.0.0.1:43128" });
+  await Promise.resolve();
+  assert.equal(calls.length, 0);
+  assert.equal(client.connected, false);
+
+  browser.dispatch(grant);
+  const connected = await pending;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${DEFAULT_RUNTIME_ORIGIN}/v1/adapters`);
+  assert.equal(calls[0].options.headers.Authorization, `Bearer ${token}`);
+  assert.equal(calls[0].options.mode, "cors");
+  assert.equal(calls[0].options.targetAddressSpace, "local");
+  assert.equal(connected.connected, true);
+  assert.equal(connected.instance_id, "paired-runtime");
+  assert.equal(connected.adapters[0].id, "claude-code");
+  assert.equal(Object.hasOwn(connected, "access_token"), false);
+  assert.equal(Object.hasOwn(connected, "token"), false);
+  assert.equal(browser.listeners.size, 0);
+  assert.equal(browser.popup.closed, true);
+});
+
+test("pairing rejects a same-popup grant with a wrong state, protocol, type or token", async (t) => {
+  for (const [name, mutate] of [
+    ["state", (grant) => ({ ...grant, state: `${grant.state}x` })],
+    ["protocol", (grant) => ({ ...grant, protocol: "coach-loopback.v1" })],
+    ["type", (grant) => ({ ...grant, type: "coach.runtime.other" })],
+    ["token length", (grant) => ({ ...grant, access_token: "t".repeat(42) })],
+    ["token alphabet", (grant) => ({ ...grant, access_token: `${"t".repeat(42)}+` })],
+  ]) {
+    await t.test(name, async () => {
+      const calls = [];
+      const browser = pairingWindow();
+      const client = createLocalAgentClient({
+        fetchImpl: async (...args) => {
+          calls.push(args);
+          return jsonResponse({ protocol: LOOPBACK_PROTOCOL, adapters: [] });
+        },
+        idFactory: () => "strict-pair-state-1234567890-abcdef",
+      });
+      const pending = client.pair({ windowRef: browser.windowRef, timeoutMs: 1_000 });
+      const state = new URL(browser.opened[0].url).searchParams.get("state");
+      const validGrant = {
+        type: "coach.runtime.grant",
+        protocol: LOOPBACK_PROTOCOL,
+        state,
+        access_token: "t".repeat(43),
+        instance_id: "paired-runtime",
+      };
+      browser.dispatch(mutate(validGrant));
+      await assert.rejects(pending, (error) => {
+        assert.equal(error.code, "PAIRING_RESPONSE_INVALID");
+        return true;
+      });
+      assert.equal(calls.length, 0);
+      assert.equal(client.connected, false);
+      assert.equal(browser.listeners.size, 0);
+    });
+  }
+});
+
 test("Runtime bearer stays inside client memory and is absent from URLs, bodies, connection results and serialization", async () => {
-  const token = "runtime-secret-".padEnd(64, "s");
+  const token = "runtime-secret-".padEnd(43, "s");
   const calls = [];
   const fetchImpl = async (url, options) => {
     calls.push({ url, options });

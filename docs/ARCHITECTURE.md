@@ -1,6 +1,6 @@
 # 架构与信任边界
 
-产品有三个入口：无需安装的静态 Web Chatbot、同源托管同一页面的 Local Agent Runtime，以及面向开发者和连接器的本地 Node CLI Conversation Harness。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
+产品只有一个考生主入口：GitHub Pages 上无需安装的静态 Web Chatbot。用户可选启动 Local Agent Runtime，让同一个 Pages 页面获得本机 Agent 讲解；Runtime 是 loopback 配对与执行桥，不是第二个学习站点。面向开发者和未来连接器的本地 Node CLI Conversation Harness 是另一种集成接口。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
 
 ## 组件
 
@@ -10,11 +10,23 @@
 
 个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。刷新时只读恢复档案和派生进度，不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
 
-直接从 GitHub Pages 打开时不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；基础私教在 Runtime 不存在、断开或模型失败时仍可完整出题、判分和保存进度。
+直接打开 GitHub Pages 时默认不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；只有用户点击“连接本机 Agent”后，才会打开固定 loopback 确认页并请求浏览器的本地网络访问许可。Runtime 不存在、浏览器不支持、用户拒绝许可、连接断开或模型失败时，基础私教仍可完整出题、判分和保存进度。
 
 ### Local Agent Runtime
 
-Runtime 只绑定 `127.0.0.1`，并同源托管 `docs/` 页面。页面在用户显式点击后获得仅存于内存的短期 Bearer，再读取员工包级 Adapter preflight；浏览器不能提交命令、路径、环境变量、模型密钥或用户身份。Codex 的 probe-only、Qoder 的结构化输出不兼容、缺少凭证与真正可选状态分别展示，不能把“安装了 CLI”冒充成“可以运行”。
+Runtime 只绑定 `127.0.0.1`。受支持的产品路径把它用作确认页和受保护 API：启动包的 `--open` 只打开精确的正式 Pages URL；用户从 Pages 发起配对，本机 `pair.html` 再显式确认授权。公开页面不能直接调用 bootstrap，也不能提交命令、路径、环境变量、模型密钥或用户身份。
+
+配对采用 capability grant，而不是 cookie session：
+
+1. Pages 在用户手势中生成随机 state，并打开固定的 loopback 确认页；
+2. 确认页由 Runtime 同源调用 `/v1/bootstrap`，请求一个绑定到精确 Pages Origin 的短期 Bearer；
+3. 确认页用精确目标 Origin 的 `postMessage` 将 grant 发回 opener；
+4. Pages 校验消息来源、窗口引用、state、协议版本、token 格式和 Runtime instance，再把 Bearer 放入 JavaScript 私有字段；
+5. 后续 `/v1/adapters`、preflight 和 `/v1/coach` 只接受精确 Pages Origin、匹配协议头和该 Origin 的 Bearer。CORS 不使用 `*` 或 cookie credentials。
+
+该流程避免页面加载即扫描本机服务，也不把授权写进 URL、DOM、浏览器存储、导出或日志。Runtime 重启或 Pages 刷新后必须重新配对。桌面 Chrome/Edge 是当前主路径；Safari、Firefox、受管浏览器和移动端不满足 loopback 访问条件时降级到 `content-only`，Runtime 不监听 LAN 地址绕过浏览器边界。
+
+Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状态，不能把“安装了 CLI”冒充成“可以运行”。Claude Code、Qwen Code 和 CodeBuddy 只有在员工包级检查通过时才可选；Qoder 因缺少 `structured_output` 不可选；Codex 在 Digital Employee `0.3.0` 中是 probe-only；Hermes Agent 指 Nous Research 的 Hermes Agent，当前也仅以 `hermes --version` 探测，执行 Adapter 尚未实现。
 
 Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 
@@ -25,9 +37,9 @@ Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 5. Runtime 通过 Digital Employee 的 one-shot Host 执行员工包，完整验证输出后只返回有界的 `teaching_result.summary`；
 6. 模型失败只会缺少本轮生成式讲解，不会回滚、重复或改写已经提交的进度。
 
-Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Harness。切换 Claude、Qwen、CodeBuddy 或退回 `content-only` 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。自然语言追问同样只读取有界上下文，不具有进度写权限。
+Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Pages Harness。切换 Claude、Qwen、CodeBuddy 或退回 `content-only` 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。自然语言追问同样只读取有界上下文，不具有进度写权限。
 
-GitHub Pages 与 `127.0.0.1` 是不同 Origin，因此各自拥有独立 IndexedDB。首次从 Pages 迁移到 Runtime 必须由用户主动导出、导入无题文档案；系统不会尝试跨 Origin 偷读或声称已经同步。迁移后，各 Agent 都在同一个 Runtime Origin 上复用同一档案。
+GitHub Pages 与 `127.0.0.1` 是不同 Origin，但 loopback 页面只负责授权，不拥有学习 IndexedDB。所有 Agent 在同一个 Pages 页面复用同一档案，正常使用不存在 Pages → Runtime 档案迁移。导出、导入仍可用于用户主动备份或换浏览器，不用于 Agent 配对。
 
 ### `progress_engine/`
 
@@ -55,7 +67,7 @@ GitHub Pages 与 `127.0.0.1` 是不同 Origin，因此各自拥有独立 Indexed
 
 ## CLI 会话与渠道
 
-CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。静态 Web 和 Local Agent UI 使用同一个浏览器存储 Adapter，不冒充具备服务端认证语义的渠道入口。Local Agent Bridge 是只读 coaching 执行层，不接管或复制浏览器档案。
+CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。静态 Web 使用浏览器存储 Adapter，不冒充具备服务端认证语义的渠道入口。Local Agent Bridge 是只读 coaching 执行层，不接管或复制浏览器档案。
 
 Digital Employee `0.3.0` 的 Agent-native Host 是 one-shot。Harness 因此不依赖 Host session，而在每轮显式重新注入：
 
@@ -107,8 +119,10 @@ Harness 与 Workbench 在调用员工包前生成两份对象：
 - 钉钉、飞书的正式 Adapter；
 - 托管 Agent Host 和线上模型凭证管理；
 - 无安装的浏览器内模型执行；Local Agent 必须运行用户明确启动的本机 Runtime；
+- Safari、Firefox 或移动端到电脑 Runtime 的兼容桥；不支持时保留 `content-only`；
 - 已签名、notarized 与自动更新的正式桌面安装器（当前 Release 是无需编译的预览包）；
 - 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
-- Codex 可运行 Adapter（当前仅 probe-only）。
+- Codex 可运行 Adapter（当前仅 probe-only）；
+- Hermes Agent（Nous Research）可运行 Adapter（当前仅探测可执行文件）。
 
 这些能力未来若实现，必须保留相同的默认拒绝和数据最小化边界。

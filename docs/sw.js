@@ -1,13 +1,15 @@
-const CACHE_NAME = "architect-pass-coach-pages-v3";
+const CACHE_NAME = "architect-pass-coach-pages-v4";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
   "./privacy.html",
+  "./pair.html",
   "./assets/app.css",
   "./src/app.mjs",
   "./src/chat-view.mjs",
   "./src/harness.mjs",
   "./src/local-agent-client.mjs",
+  "./src/pair.mjs",
   "./src/indexeddb-store.mjs",
   "./src/progress-rules.mjs",
   "./src/content-worker.mjs",

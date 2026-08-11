@@ -1,4 +1,10 @@
-export const LOOPBACK_PROTOCOL = "coach-loopback.v1";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v2";
+export const DEFAULT_RUNTIME_ORIGIN = "http://127.0.0.1:43127";
+export const PUBLIC_COACH_ORIGIN = "https://peterguy326.github.io";
+
+const PAIRING_MESSAGE_TYPE = "coach.runtime.grant";
+const PAIRING_STATE = /^[A-Za-z0-9_-]{32,128}$/u;
+const RUNTIME_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
 
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_COACHING_CHARS = 2_000;
@@ -187,7 +193,7 @@ function requestId() {
     globalThis.crypto.getRandomValues(bytes);
     return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
   }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  throw clientError("SECURE_RANDOM_UNAVAILABLE", "当前浏览器不能生成安全的本机配对状态。");
 }
 
 export function isLocalAgentRuntimeOrigin(value = globalThis.location?.origin) {
@@ -208,9 +214,9 @@ export class LocalAgentClient {
   #instanceId = null;
   #idFactory;
 
-  constructor({ origin = globalThis.location?.origin, fetchImpl = globalThis.fetch, idFactory = requestId } = {}) {
+  constructor({ origin = DEFAULT_RUNTIME_ORIGIN, fetchImpl = globalThis.fetch, idFactory = requestId } = {}) {
     if (!isLocalAgentRuntimeOrigin(origin)) {
-      throw clientError("LOOPBACK_RUNTIME_REQUIRED", "仅可从 127.0.0.1 本机 Runtime 页面连接 Agent。");
+      throw clientError("LOOPBACK_RUNTIME_REQUIRED", "Agent Runtime 端点必须是 127.0.0.1 本机地址。");
     }
     if (typeof fetchImpl !== "function") throw new TypeError("fetch_function_required");
     if (typeof idFactory !== "function") throw new TypeError("id_factory_required");
@@ -247,7 +253,7 @@ export class LocalAgentClient {
     const token = typeof result.access_token === "string"
       ? result.access_token
       : (typeof result.bearer_token === "string" ? result.bearer_token : result.token);
-    if (typeof token !== "string" || token.length < 32 || token.length > 4_096) {
+    if (typeof token !== "string" || !RUNTIME_TOKEN.test(token)) {
       throw clientError("INVALID_BOOTSTRAP", "本机 Runtime 没有签发有效的内存令牌。");
     }
     this.#token = token;
@@ -259,6 +265,95 @@ export class LocalAgentClient {
       this.disconnect();
       throw error;
     }
+  }
+
+  /**
+   * Opens the Runtime-owned confirmation page and adopts its one-time grant.
+   * The bearer never appears in a URL, DOM node, browser store, or return
+   * value; it moves from the loopback popup to this private field only.
+   */
+  pair({ windowRef = globalThis.window, timeoutMs = 120_000 } = {}) {
+    this.disconnect();
+    if (
+      !windowRef
+      || typeof windowRef.open !== "function"
+      || typeof windowRef.addEventListener !== "function"
+      || typeof windowRef.removeEventListener !== "function"
+    ) {
+      return Promise.reject(clientError("PAIRING_UNAVAILABLE", "当前浏览器不能打开本机 Agent 配对窗口。"));
+    }
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) {
+      return Promise.reject(new TypeError("timeoutMs_must_be_1000_to_300000"));
+    }
+    let state;
+    try {
+      state = String(this.#idFactory()).replace(/[^A-Za-z0-9_-]/gu, "").padEnd(32, "0").slice(0, 128);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (!PAIRING_STATE.test(state)) {
+      return Promise.reject(clientError("PAIRING_STATE_INVALID", "无法建立安全的本机配对状态。"));
+    }
+    const pairUrl = new URL("/pair.html", this.#origin);
+    pairUrl.searchParams.set("state", state);
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let popup = null;
+      const finish = (error, grant) => {
+        if (settled) return;
+        settled = true;
+        windowRef.removeEventListener("message", onMessage);
+        globalThis.clearTimeout(timeout);
+        try { popup?.close?.(); } catch { /* best-effort popup cleanup */ }
+        if (error) reject(error);
+        else resolve(grant);
+      };
+      const onMessage = (event) => {
+        if (event.source !== popup || event.origin !== this.#origin) return;
+        const data = event.data;
+        if (
+          !data
+          || typeof data !== "object"
+          || Array.isArray(data)
+          || data.type !== PAIRING_MESSAGE_TYPE
+          || data.protocol !== LOOPBACK_PROTOCOL
+          || data.state !== state
+          || !RUNTIME_TOKEN.test(data.access_token)
+          || typeof data.instance_id !== "string"
+          || data.instance_id.length < 1
+          || data.instance_id.length > 128
+        ) {
+          finish(clientError("PAIRING_RESPONSE_INVALID", "本机 Runtime 返回了无效配对授权。"));
+          return;
+        }
+        this.#token = data.access_token;
+        this.#instanceId = cleanText(data.instance_id, 128) || null;
+        this.listAdapters().then(
+          (adapters) => finish(null, Object.freeze({ ...this.connectionInfo, adapters })),
+          (error) => {
+            this.disconnect();
+            finish(error);
+          },
+        );
+      };
+      windowRef.addEventListener("message", onMessage);
+      const timeout = globalThis.setTimeout(() => {
+        finish(clientError("PAIRING_TIMEOUT", "本机 Agent 配对已超时，请重新连接。"));
+      }, timeoutMs);
+      try {
+        popup = windowRef.open(
+          pairUrl.href,
+          `coach-agent-pair-${state}`,
+          "popup,width=520,height=680,resizable=yes,scrollbars=yes",
+        );
+      } catch {
+        popup = null;
+      }
+      if (!popup) {
+        finish(clientError("PAIRING_POPUP_BLOCKED", "浏览器拦截了配对窗口，请允许弹窗后重试。"));
+      }
+    });
   }
 
   disconnect() {
@@ -334,11 +429,15 @@ export class LocalAgentClient {
     try {
       response = await this.#fetch(url.href, {
         method,
+        mode: "cors",
         headers,
         body: body === undefined ? undefined : JSON.stringify(cloneJson(body)),
         credentials: "omit",
         cache: "no-store",
         redirect: "error",
+        // Chrome's LNA RequestInit enum calls both RFC1918 and loopback
+        // destinations "local". The URL itself remains pinned to 127.0.0.1.
+        targetAddressSpace: "local",
       });
     } catch {
       throw clientError("RUNTIME_UNREACHABLE", "本机 Agent Runtime 暂时无法连接。");

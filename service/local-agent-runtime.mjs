@@ -8,19 +8,31 @@ import path from "node:path";
 import { inspectEmployeeHostCompatibility } from "@fullstack-ai-infra/digital-employee/host-runtime";
 
 import { DigitalEmployeeHostRunner } from "./host-runner.mjs";
+import {
+  COACH_ENGINE_CATALOG,
+  createCoachAgentHostRegistry,
+} from "./agent-host-registry.mjs";
 import { employeePackageDirectory, repositoryRoot } from "./paths.mjs";
 import { validateTeachingOutput } from "./proposal-validator.mjs";
 import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validator.mjs";
 
-export const LOOPBACK_PROTOCOL = "coach-loopback.v1";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v2";
 export const LOOPBACK_HOST = "127.0.0.1";
 export const DEFAULT_LOOPBACK_PORT = 43_127;
+export const PUBLIC_COACH_URL = "https://peterguy326.github.io/senior-architect-pass-coach/";
+export const PUBLIC_COACH_ORIGIN = "https://peterguy326.github.io";
 
 const DEFAULT_DOCS_ROOT = path.join(repositoryRoot, "docs");
 const DEFAULT_MAX_BODY_BYTES = 128 * 1024;
 const DEFAULT_MAX_STATIC_BYTES = 8 * 1024 * 1024;
+const DEFAULT_GRANT_LIFETIME_MS = 4 * 60 * 60 * 1_000;
 const MAX_IDEMPOTENCY_RESULTS = 64;
 const MAX_BEARER_HASHES = 4;
+const PAIR_STATIC_PATHS = new Set([
+  "/pair.html",
+  "/src/local-agent-client.mjs",
+  "/src/pair.mjs",
+]);
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -46,14 +58,6 @@ const SOURCE_REFS = new Set([
   "senior-software-architect-review",
   "user-supplied-local-review-material",
 ]);
-const ENGINE_CATALOG = Object.freeze([
-  Object.freeze({ id: "claude-code", label: "Claude Code" }),
-  Object.freeze({ id: "qoder", label: "Qoder CLI" }),
-  Object.freeze({ id: "codex", label: "Codex CLI" }),
-  Object.freeze({ id: "qwen-code", label: "Qwen Code" }),
-  Object.freeze({ id: "codebuddy", label: "CodeBuddy Code" }),
-]);
-const ENGINE_IDS = new Set(ENGINE_CATALOG.map(({ id }) => id));
 const PUBLIC_HOST_STATUSES = new Set(["ready", "installed", "not_ready", "not_found", "probe_failed"]);
 const JSON_HEADERS = Object.freeze({
   "Cache-Control": "no-store",
@@ -274,7 +278,7 @@ function validateProgress(value) {
   return cloneJson(value);
 }
 
-function normalizeCoachRequest(value) {
+function normalizeCoachRequest(value, engineIds) {
   exactObject(
     value,
     ["phase", "engine", "public_question", "trusted_grade", "deidentified_progress", "message"],
@@ -283,7 +287,7 @@ function normalizeCoachRequest(value) {
   const phase = boundedText(value.phase, 16);
   if (!new Set(["submit", "chat"]).has(phase)) throw requestError("INVALID_REQUEST");
   const engine = boundedText(value.engine, 64);
-  if (!ENGINE_IDS.has(engine)) throw requestError("ADAPTER_NOT_FOUND");
+  if (!engineIds.has(engine)) throw requestError("ADAPTER_NOT_FOUND");
   const publicQuestion = value.public_question === null && phase === "chat"
     ? null
     : validateQuestion(value.public_question);
@@ -480,13 +484,13 @@ function isSelectableAdapter(host, compatibility) {
 
 function adapterState(host, compatibility) {
   if (isSelectableAdapter(host, compatibility)) return "ready";
+  if (["not_found", "probe_failed"].includes(host?.status)) return "unavailable";
   if (host?.adapterStatus === "probe_only") return "probe_only";
   if (Array.isArray(compatibility?.missing) && compatibility.missing.includes("structured_output")) {
     return "incompatible";
   }
   if (host?.status === "not_ready") return "needs_configuration";
   if (host?.status === "installed") return "ready_unverified";
-  if (["not_found", "probe_failed"].includes(host?.status)) return "unavailable";
   return "incompatible";
 }
 
@@ -517,11 +521,14 @@ function hashToken(token) {
   return createHash("sha256").update(token, "utf8").digest();
 }
 
-function tokenMatches(token, hashes) {
+function tokenMatches(token, grants, origin, now) {
   if (!TOKEN_PATTERN.test(token)) return false;
   const candidate = hashToken(token);
-  return hashes.some((expected) => (
-    expected.length === candidate.length && timingSafeEqual(expected, candidate)
+  return grants.some((grant) => (
+    grant.origin === origin
+    && grant.expiresAt > now
+    && grant.hash.length === candidate.length
+    && timingSafeEqual(grant.hash, candidate)
   ));
 }
 
@@ -671,9 +678,10 @@ async function openStaticAsset(root, requestTarget, maximumBytes) {
 }
 
 /**
- * Same-origin loopback facade. The browser Harness remains the only owner of
- * learner state and deterministic grading; this runtime only performs a
- * package-validated, one-shot coaching run and discards all event proposals.
+ * Explicitly paired loopback facade. The public Pages Harness remains the
+ * only owner of learner state and deterministic grading; this runtime only
+ * performs a package-validated, one-shot coaching run and discards all event
+ * proposals.
  */
 export class LocalAgentRuntime {
   constructor({
@@ -682,10 +690,18 @@ export class LocalAgentRuntime {
     maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
     maxStaticBytes = DEFAULT_MAX_STATIC_BYTES,
     inspectAdapter = inspectEmployeeHostCompatibility,
-    runnerFactory = ({ engine }) => new DigitalEmployeeHostRunner({ engine }),
+    hostRegistry = createCoachAgentHostRegistry(),
+    engineCatalog = COACH_ENGINE_CATALOG,
+    runnerFactory = ({ engine, hostRegistry: registry }) => new DigitalEmployeeHostRunner({
+      engine,
+      hostRegistry: registry,
+    }),
     tokenFactory = () => randomBytes(32).toString("base64url"),
     serverFactory = createServer,
     employeeDirectory = employeePackageDirectory,
+    publicCoachUrl = PUBLIC_COACH_URL,
+    grantLifetimeMs = DEFAULT_GRANT_LIFETIME_MS,
+    clock = () => Date.now(),
   } = {}) {
     if (!Number.isSafeInteger(port) || (port !== 0 && port < 1_024) || port > 65_535) {
       throw new TypeError("port_must_be_0_or_1024_to_65535");
@@ -693,20 +709,73 @@ export class LocalAgentRuntime {
     if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1) {
       throw new TypeError("maxBodyBytes_must_be_positive");
     }
+    if (
+      !Number.isSafeInteger(grantLifetimeMs)
+      || grantLifetimeMs < 5 * 60 * 1_000
+      || grantLifetimeMs > 24 * 60 * 60 * 1_000
+    ) {
+      throw new TypeError("grantLifetimeMs_must_be_5_minutes_to_24_hours");
+    }
+    if (typeof clock !== "function") throw new TypeError("clock_required");
+    if (!hostRegistry || typeof hostRegistry.resolve !== "function") {
+      throw new TypeError("hostRegistry_required");
+    }
+    if (!Array.isArray(engineCatalog) || engineCatalog.length < 1) {
+      throw new TypeError("engineCatalog_required");
+    }
+    const normalizedCatalog = engineCatalog.map((entry) => {
+      if (
+        !entry
+        || typeof entry !== "object"
+        || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(entry.id)
+        || typeof entry.label !== "string"
+        || entry.label.length < 1
+        || entry.label.length > 80
+      ) {
+        throw new TypeError("engineCatalog_invalid");
+      }
+      return Object.freeze({ id: entry.id, label: entry.label });
+    });
+    if (new Set(normalizedCatalog.map(({ id }) => id)).size !== normalizedCatalog.length) {
+      throw new TypeError("engineCatalog_duplicate_id");
+    }
+    let parsedPublicCoachUrl;
+    try {
+      parsedPublicCoachUrl = new URL(publicCoachUrl);
+    } catch {
+      throw new TypeError("publicCoachUrl_invalid");
+    }
+    if (
+      parsedPublicCoachUrl.protocol !== "https:"
+      || parsedPublicCoachUrl.username
+      || parsedPublicCoachUrl.password
+      || parsedPublicCoachUrl.search
+      || parsedPublicCoachUrl.hash
+      || !parsedPublicCoachUrl.pathname.endsWith("/")
+    ) {
+      throw new TypeError("publicCoachUrl_invalid");
+    }
     this.docsRoot = path.resolve(docsRoot);
     this.port = port;
     this.maxBodyBytes = maxBodyBytes;
     this.maxStaticBytes = maxStaticBytes;
     this.inspectAdapter = inspectAdapter;
+    this.hostRegistry = hostRegistry;
+    this.engineCatalog = Object.freeze(normalizedCatalog);
+    this.engineIds = new Set(normalizedCatalog.map(({ id }) => id));
     this.runnerFactory = runnerFactory;
     this.tokenFactory = tokenFactory;
     this.serverFactory = serverFactory;
     this.employeeDirectory = employeeDirectory;
+    this.publicCoachUrl = parsedPublicCoachUrl.href;
+    this.publicCoachOrigin = parsedPublicCoachUrl.origin;
+    this.grantLifetimeMs = grantLifetimeMs;
+    this.clock = clock;
     this.server = null;
     this.canonicalDocsRoot = null;
     this.exactHost = null;
     this.origin = null;
-    this.bearerHashes = [];
+    this.bearerGrants = [];
     this.idempotency = new Map();
     this.runBusy = false;
     this.instanceId = randomUUID();
@@ -724,6 +793,7 @@ export class LocalAgentRuntime {
     }
     this.canonicalDocsRoot = await realpath(this.docsRoot);
     const server = this.serverFactory((request, response) => {
+      this.#applyCorsHeaders(request, response);
       this.#handle(request, response).catch((error) => {
         if (!response.headersSent) {
           const result = safeErrorResult(error);
@@ -751,14 +821,20 @@ export class LocalAgentRuntime {
     this.server = server;
     this.exactHost = `${LOOPBACK_HOST}:${address.port}`;
     this.origin = `http://${this.exactHost}`;
-    return { url: this.url, host: LOOPBACK_HOST, port: address.port, protocol: LOOPBACK_PROTOCOL };
+    return {
+      url: this.url,
+      public_url: this.publicCoachUrl,
+      host: LOOPBACK_HOST,
+      port: address.port,
+      protocol: LOOPBACK_PROTOCOL,
+    };
   }
 
   async stop() {
     const server = this.server;
     if (!server) return;
     this.server = null;
-    this.bearerHashes.length = 0;
+    this.bearerGrants.length = 0;
     this.idempotency.clear();
     await new Promise((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
@@ -769,13 +845,14 @@ export class LocalAgentRuntime {
   }
 
   async inspect(engine) {
-    const entry = ENGINE_CATALOG.find((candidate) => candidate.id === engine);
+    const entry = this.engineCatalog.find((candidate) => candidate.id === engine);
     if (!entry) throw requestError("ADAPTER_NOT_FOUND");
     let inspection;
     try {
       inspection = await this.inspectAdapter({
         directory: this.employeeDirectory,
         engine,
+        hostRegistry: this.hostRegistry,
       });
     } catch {
       inspection = null;
@@ -786,8 +863,13 @@ export class LocalAgentRuntime {
   async #handle(request, response) {
     this.#assertHost(request);
     const pathname = rawPathname(request.url || "/");
+    if (request.method === "OPTIONS" && pathname.startsWith("/v1/")) {
+      this.#handleCorsPreflight(request, response, pathname);
+      return;
+    }
     if (pathname === "/v1/health") {
       if (request.method !== "GET") throw requestError("METHOD_NOT_ALLOWED");
+      this.#assertAllowedApiOrigin(request, { allowMissing: true });
       sendJson(response, 200, {
         protocol: LOOPBACK_PROTOCOL,
         status: "ready",
@@ -800,18 +882,28 @@ export class LocalAgentRuntime {
     if (pathname === "/v1/bootstrap") {
       if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
       this.#assertProtocol(request);
-      this.#assertExactOrigin(request, { required: true });
+      const requestOrigin = this.#assertAllowedApiOrigin(request, { required: true });
+      if (requestOrigin !== this.origin) throw requestError("ORIGIN_NOT_ALLOWED");
       const { value } = await readJson(request, this.maxBodyBytes, { allowEmpty: true });
-      exactObject(value, ["protocol"], []);
+      exactObject(value, ["protocol", "grant_origin"], []);
       if (value.protocol !== undefined && value.protocol !== LOOPBACK_PROTOCOL) {
         throw requestError("PROTOCOL_REQUIRED");
+      }
+      const grantOrigin = value.grant_origin === undefined ? this.origin : value.grant_origin;
+      if (![this.origin, this.publicCoachOrigin].includes(grantOrigin)) {
+        throw requestError("ORIGIN_NOT_ALLOWED");
       }
       const token = this.tokenFactory();
       if (typeof token !== "string" || !TOKEN_PATTERN.test(token)) {
         throw requestError("RUNTIME_INTERNAL");
       }
-      this.bearerHashes.push(hashToken(token));
-      if (this.bearerHashes.length > MAX_BEARER_HASHES) this.bearerHashes.shift();
+      this.#purgeExpiredGrants();
+      this.bearerGrants.push({
+        hash: hashToken(token),
+        origin: grantOrigin,
+        expiresAt: this.clock() + this.grantLifetimeMs,
+      });
+      if (this.bearerGrants.length > MAX_BEARER_HASHES) this.bearerGrants.shift();
       sendJson(response, 200, {
         protocol: LOOPBACK_PROTOCOL,
         status: "ready",
@@ -823,7 +915,7 @@ export class LocalAgentRuntime {
     if (pathname === "/v1/adapters") {
       if (request.method !== "GET") throw requestError("METHOD_NOT_ALLOWED");
       this.#assertProtected(request);
-      const adapters = await Promise.all(ENGINE_CATALOG.map(({ id }) => this.inspect(id)));
+      const adapters = await Promise.all(this.engineCatalog.map(({ id }) => this.inspect(id)));
       sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapters });
       return;
     }
@@ -850,6 +942,22 @@ export class LocalAgentRuntime {
     }
     if (pathname.startsWith("/v1/")) throw requestError("NOT_FOUND");
     if (!new Set(["GET", "HEAD"]).has(request.method)) throw requestError("METHOD_NOT_ALLOWED");
+    const decodedStaticPath = `/${decodeStaticSegments(request.url || "/").join("/")}`;
+    if (decodedStaticPath === "/index.html") {
+      response.writeHead(302, {
+        "Cache-Control": "no-store",
+        "Content-Length": "0",
+        "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        "Cross-Origin-Opener-Policy": "unsafe-none",
+        Location: this.publicCoachUrl,
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+      });
+      response.end();
+      return;
+    }
+    if (!PAIR_STATIC_PATHS.has(decodedStaticPath)) throw requestError("STATIC_NOT_FOUND");
     const asset = await openStaticAsset(
       this.canonicalDocsRoot,
       request.url || "/",
@@ -862,7 +970,7 @@ export class LocalAgentRuntime {
       "Cache-Control": cacheControl,
       "Content-Length": asset.body.length,
       "Content-Type": STATIC_MIME_TYPES[asset.extension] || "application/octet-stream",
-      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Opener-Policy": pathname === "/pair.html" ? "unsafe-none" : "same-origin",
       "Referrer-Policy": "no-referrer",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
@@ -889,26 +997,80 @@ export class LocalAgentRuntime {
     }
   }
 
-  #assertExactOrigin(request, { required = false } = {}) {
+  #applyCorsHeaders(request, response) {
+    if (request.headers.origin !== this.publicCoachOrigin) return;
+    response.setHeader("Access-Control-Allow-Origin", this.publicCoachOrigin);
+    response.setHeader("Access-Control-Expose-Headers", "Idempotency-Replayed");
+    response.setHeader("Vary", "Origin");
+  }
+
+  #handleCorsPreflight(request, response, pathname) {
+    const origin = this.#assertAllowedApiOrigin(request, { required: true });
+    if (origin !== this.publicCoachOrigin) throw requestError("ORIGIN_NOT_ALLOWED");
+    const requestedMethod = request.headers["access-control-request-method"];
+    const routeMethod = pathname === "/v1/adapters"
+      ? "GET"
+      : (/^\/v1\/adapters\/[A-Za-z0-9-]+\/preflight$/u.test(pathname) || pathname === "/v1/coach")
+        ? "POST"
+        : null;
+    if (requestedMethod !== routeMethod) throw requestError("METHOD_NOT_ALLOWED");
+    const allowedHeaders = new Set([
+      "authorization",
+      "content-type",
+      "idempotency-key",
+      "x-coach-protocol",
+    ]);
+    const requestedHeaders = String(request.headers["access-control-request-headers"] || "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean);
+    if (requestedHeaders.some((header) => !allowedHeaders.has(header))) {
+      throw requestError("ORIGIN_NOT_ALLOWED");
+    }
+    const extraHeaders = {
+      "Access-Control-Allow-Headers": [...allowedHeaders].join(", "),
+      "Access-Control-Allow-Methods": routeMethod,
+      "Access-Control-Max-Age": "600",
+      Vary: "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+    };
+    if (request.headers["access-control-request-private-network"] === "true") {
+      extraHeaders["Access-Control-Allow-Private-Network"] = "true";
+    }
+    sendEmpty(response, 204, extraHeaders);
+  }
+
+  #assertAllowedApiOrigin(request, { required = false, allowMissing = false } = {}) {
     const origin = request.headers.origin;
-    if ((required && origin !== this.origin) || (origin !== undefined && origin !== this.origin)) {
+    if (origin === undefined && allowMissing) return null;
+    if (required && origin === undefined) throw requestError("ORIGIN_NOT_ALLOWED");
+    if (![this.origin, this.publicCoachOrigin].includes(origin)) {
       throw requestError("ORIGIN_NOT_ALLOWED");
     }
     const fetchSite = request.headers["sec-fetch-site"];
-    if (fetchSite !== undefined && fetchSite !== "same-origin") {
+    const expectedSite = origin === this.origin ? "same-origin" : "cross-site";
+    if (fetchSite !== undefined && fetchSite !== expectedSite) {
       throw requestError("ORIGIN_NOT_ALLOWED");
     }
+    return origin;
   }
 
   #assertProtected(request) {
     this.#assertProtocol(request);
-    this.#assertExactOrigin(request);
+    const origin = this.#assertAllowedApiOrigin(request, { required: true });
     const authorization = request.headers.authorization;
     if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
       throw requestError("AUTH_REQUIRED");
     }
     const token = authorization.slice("Bearer ".length);
-    if (!tokenMatches(token, this.bearerHashes)) throw requestError("AUTH_REQUIRED");
+    this.#purgeExpiredGrants();
+    if (!tokenMatches(token, this.bearerGrants, origin, this.clock())) {
+      throw requestError("AUTH_REQUIRED");
+    }
+  }
+
+  #purgeExpiredGrants() {
+    const now = this.clock();
+    this.bearerGrants = this.bearerGrants.filter((grant) => grant.expiresAt > now);
   }
 
   async #handleCoach(response, idempotencyKey, rawBody, value) {
@@ -921,7 +1083,7 @@ export class LocalAgentRuntime {
       return;
     }
     if (this.runBusy) throw requestError("AGENT_BUSY");
-    const normalized = normalizeCoachRequest(value);
+    const normalized = normalizeCoachRequest(value, this.engineIds);
     this.runBusy = true;
     const result = this.#runCoach(normalized)
       .then((body) => ({ statusCode: 200, body }))
@@ -946,7 +1108,7 @@ export class LocalAgentRuntime {
     if (!adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
     let output;
     try {
-      const runner = this.runnerFactory({ engine: request.engine });
+      const runner = this.runnerFactory({ engine: request.engine, hostRegistry: this.hostRegistry });
       if (!runner || typeof runner.preflight !== "function" || typeof runner.run !== "function") {
         throw new Error("invalid_runner");
       }

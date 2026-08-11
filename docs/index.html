@@ -8,7 +8,7 @@
     <meta name="referrer" content="no-referrer">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com http://127.0.0.1:43127; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     >
     <meta
       name="description"
@@ -235,14 +235,14 @@
         基础私教始终可用。Agent 只接收当前公开题面、可信判分和去身份化进度摘要；切换引擎不会清空题目或学习记录。
       </p>
       <div class="runtime-callout" id="runtime-callout">
-        <p id="runtime-callout-copy">当前是公开网页：不会扫描或连接 localhost。要用 Agent，请安装并从本机 Runtime 打开同一页面。</p>
+        <p id="runtime-callout-copy">这是公开网页。只有你点击后，才会打开 127.0.0.1 的本机确认窗口；页面加载时不会扫描端口。</p>
         <a
           class="source-link"
           id="runtime-install-link"
           href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases"
           rel="noreferrer"
         >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
-        <button class="secondary-action" id="runtime-connect" type="button" hidden>显式连接本机 Runtime</button>
+        <button class="secondary-action" id="runtime-connect" type="button">连接本机 Agent</button>
       </div>
       <div class="engine-list" id="engine-list" aria-label="可选讲解引擎">
         <button class="engine-card" type="button" data-engine="content-only" data-engine-state="ready" aria-pressed="true">

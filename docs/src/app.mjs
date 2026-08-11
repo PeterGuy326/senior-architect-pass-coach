@@ -1,6 +1,11 @@
 import { createWebCoachHarness } from "./harness.mjs";
 import { createChatView } from "./chat-view.mjs";
-import { createLocalAgentClient, isLocalAgentRuntimeOrigin } from "./local-agent-client.mjs";
+import {
+  createLocalAgentClient,
+  DEFAULT_RUNTIME_ORIGIN,
+  isLocalAgentRuntimeOrigin,
+  PUBLIC_COACH_ORIGIN,
+} from "./local-agent-client.mjs";
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const ANSWER_LABELS = /^[A-H]+$/u;
@@ -70,7 +75,17 @@ let selectedEngine = "content-only";
 let connectingRuntime = false;
 
 const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
+const PUBLIC_COACH_PAGE = location.origin === PUBLIC_COACH_ORIGIN;
+const STATIC_AGENT_CATALOG = Object.freeze([
+  Object.freeze({ id: "claude-code", label: "Claude Code" }),
+  Object.freeze({ id: "qoder", label: "Qoder CLI" }),
+  Object.freeze({ id: "codex", label: "Codex CLI" }),
+  Object.freeze({ id: "qwen-code", label: "Qwen Code" }),
+  Object.freeze({ id: "codebuddy", label: "CodeBuddy Code" }),
+  Object.freeze({ id: "hermes", label: "Hermes Agent (Nous Research)" }),
+]);
 const ADAPTER_STATE_LABELS = Object.freeze({
+  runtime_required: "等待连接本机",
   ready: "可用",
   ready_unverified: "等待验证",
   needs_configuration: "需要配置",
@@ -88,6 +103,9 @@ const ADAPTER_REASON_LABELS = Object.freeze({
   codebuddy_api_key_not_configured: "尚未配置 CodeBuddy 服务凭据",
   codebuddy_model_not_configured: "尚未配置 CodeBuddy 模型",
   claude_version_probe_failed: "Claude Code 版本检测失败",
+  hermes_adapter_not_implemented: "Digital Employee 尚无合格的 Hermes 运行适配器",
+  hermes_executable_not_found: "本机未发现 Hermes Agent",
+  hermes_version_probe_failed: "Hermes Agent 版本检测失败",
 });
 
 function safeMessage(error, fallback = "私人老师暂时无法继续，请稍后重试。") {
@@ -173,7 +191,15 @@ function renderEngineList() {
     state: "ready",
     selectable: true,
   });
-  const cards = runtimeAdapters.map((adapter) => createEngineCard(adapter));
+  const visibleAdapters = runtimeAdapters.length
+    ? runtimeAdapters
+    : STATIC_AGENT_CATALOG.map((adapter) => ({
+        ...adapter,
+        state: "runtime_required",
+        selectable: false,
+        detail: "连接本机 Runtime 后才会检测安装、凭据和契约兼容性。",
+      }));
+  const cards = visibleAdapters.map((adapter) => createEngineCard(adapter));
   elements.engineList.replaceChildren(contentOnly, ...cards);
   updateEngineUi();
 }
@@ -193,15 +219,19 @@ async function selectEngine(engine) {
 }
 
 async function connectRuntime() {
-  if (!LOOPBACK_RUNTIME_PAGE || connectingRuntime || operating) return;
+  if ((!LOOPBACK_RUNTIME_PAGE && !PUBLIC_COACH_PAGE) || connectingRuntime || operating) return;
   connectingRuntime = true;
   let completionMessage = "";
   elements.runtimeConnect.disabled = true;
   elements.engineTrigger.disabled = true;
   elements.engineDialogStatus.textContent = "正在与本机 Runtime 建立仅存内存的授权……";
   try {
-    const client = createLocalAgentClient({ origin: location.origin });
-    const connection = await client.connect();
+    const client = createLocalAgentClient({
+      origin: LOOPBACK_RUNTIME_PAGE ? location.origin : DEFAULT_RUNTIME_ORIGIN,
+    });
+    const connection = LOOPBACK_RUNTIME_PAGE
+      ? await client.connect()
+      : await client.pair({ windowRef: window });
     localAgentClient?.disconnect();
     localAgentClient = client;
     runtimeAdapters = connection.adapters;
@@ -230,10 +260,14 @@ function setupEngineControls() {
     elements.runtimeConnect.hidden = false;
     elements.runtimeInstallLink.hidden = true;
     elements.runtimeCalloutCopy.textContent = "当前页面由 127.0.0.1 本机 Runtime 提供。只有点击下方按钮后才会连接；授权令牌仅留在页面内存。";
+  } else if (PUBLIC_COACH_PAGE) {
+    elements.runtimeConnect.hidden = false;
+    elements.runtimeInstallLink.hidden = false;
+    elements.runtimeCalloutCopy.textContent = "这是公开网页。只有你点击后，才会打开 127.0.0.1 的本机确认窗口；页面加载时不会扫描端口。";
   } else {
     elements.runtimeConnect.hidden = true;
     elements.runtimeInstallLink.hidden = false;
-    elements.runtimeCalloutCopy.textContent = "当前是公开网页：不会扫描或连接 localhost。要用 Agent，请安装并从本机 Runtime 打开同一页面。";
+    elements.runtimeCalloutCopy.textContent = "这个预览来源不能连接本机 Runtime。请使用正式 GitHub Pages 页面。";
   }
   elements.engineTrigger.addEventListener("click", () => {
     if (typeof elements.engineDialog.showModal === "function") elements.engineDialog.showModal();
@@ -695,7 +729,9 @@ chat.setComposer({ enabled: false });
 chat.setStatus(
   LOOPBACK_RUNTIME_PAGE
     ? "本机 Runtime 页面 · 尚未连接 Agent · 学习数据仍仅存浏览器"
-    : "零安装基础私教 · 数据仅存当前浏览器",
+    : PUBLIC_COACH_PAGE
+      ? "网页私教 · 可显式连接本机 Agent · 数据仅存当前浏览器"
+      : "网页预览 · 数据仅存当前浏览器",
   "ready",
 );
 

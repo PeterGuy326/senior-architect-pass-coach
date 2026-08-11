@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,8 @@ import {
   createLocalAgentRuntime,
   LOOPBACK_HOST,
   LOOPBACK_PROTOCOL,
+  PUBLIC_COACH_ORIGIN,
+  PUBLIC_COACH_URL,
 } from "../service/local-agent-runtime.mjs";
 import { openRuntimeUrl } from "../service/runtime-cli.mjs";
 import { LocalAgentClient } from "../docs/src/local-agent-client.mjs";
@@ -164,24 +166,34 @@ async function fixture(options = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "coach-loopback-test-"));
   await writeFile(path.join(directory, "index.html"), "<!doctype html><title>Local Coach</title>", "utf8");
   await writeFile(path.join(directory, "app.mjs"), "export const local = true;", "utf8");
-  const calls = { inspections: [], preflights: 0, runs: [] };
-  const inspectAdapter = options.inspectAdapter || (async ({ engine, directory: packageDirectory }) => {
-    calls.inspections.push({ engine, packageDirectory });
+  await mkdir(path.join(directory, "src"));
+  await writeFile(path.join(directory, "pair.html"), "<!doctype html><title>Pair Coach</title>", "utf8");
+  await writeFile(path.join(directory, "src", "pair.mjs"), "export const pair = true;", "utf8");
+  await writeFile(path.join(directory, "src", "local-agent-client.mjs"), "export const client = true;", "utf8");
+  const calls = { inspections: [], preflights: 0, runnerRegistries: [], runs: [] };
+  const inspectAdapter = options.inspectAdapter || (async ({ engine, directory: packageDirectory, hostRegistry }) => {
+    calls.inspections.push({ engine, packageDirectory, hostRegistry });
     return readyInspection();
   });
-  const runnerFactory = options.runnerFactory || (() => ({
-    async preflight() { calls.preflights += 1; },
-    async run(input) {
-      calls.runs.push(input);
-      return completedSubmitOutput();
-    },
-  }));
+  const runnerFactory = options.runnerFactory || (({ hostRegistry } = {}) => {
+    calls.runnerRegistries.push(hostRegistry);
+    return {
+      async preflight() { calls.preflights += 1; },
+      async run(input) {
+        calls.runs.push(input);
+        return completedSubmitOutput();
+      },
+    };
+  });
   const runtime = createLocalAgentRuntime({
     docsRoot: directory,
     port: 0,
     inspectAdapter,
     runnerFactory,
     tokenFactory: () => TOKEN,
+    ...(options.hostRegistry ? { hostRegistry: options.hostRegistry } : {}),
+    ...(options.clock ? { clock: options.clock } : {}),
+    ...(options.grantLifetimeMs ? { grantLifetimeMs: options.grantLifetimeMs } : {}),
   });
   await runtime.start();
   return {
@@ -207,15 +219,19 @@ function baseHeaders(runtime, token = TOKEN) {
   };
 }
 
-async function bootstrap(runtime, origin = runtime.origin) {
+async function bootstrap(runtime, origin = runtime.origin, { grantOrigin, fetchSite } = {}) {
   return json(await fetch(`${runtime.origin}/v1/bootstrap`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Origin: origin,
+      ...(fetchSite ? { "Sec-Fetch-Site": fetchSite } : {}),
       "X-Coach-Protocol": LOOPBACK_PROTOCOL,
     },
-    body: JSON.stringify({ protocol: LOOPBACK_PROTOCOL }),
+    body: JSON.stringify({
+      protocol: LOOPBACK_PROTOCOL,
+      ...(grantOrigin ? { grant_origin: grantOrigin } : {}),
+    }),
   }));
 }
 
@@ -252,7 +268,7 @@ function rawRequest(runtime, { path: requestPath, host = runtime.exactHost }) {
   });
 }
 
-test("runtime binds IPv4 loopback, serves docs, and exposes a non-sensitive health check", async (t) => {
+test("runtime binds IPv4 loopback, redirects its root to Pages, serves only pairing assets, and exposes health", async (t) => {
   const environment = await fixture();
   t.after(() => environment.close());
 
@@ -260,10 +276,19 @@ test("runtime binds IPv4 loopback, serves docs, and exposes a non-sensitive heal
   assert.equal(address.address, LOOPBACK_HOST);
   assert.equal(environment.runtime.url, `${environment.runtime.origin}/`);
 
-  const page = await fetch(environment.runtime.url);
-  assert.equal(page.status, 200);
-  assert.match(await page.text(), /Local Coach/u);
+  const page = await fetch(environment.runtime.url, { redirect: "manual" });
+  assert.equal(page.status, 302);
+  assert.equal(page.headers.get("location"), PUBLIC_COACH_URL);
   assert.equal(page.headers.get("x-frame-options"), "DENY");
+  assert.equal(await page.text(), "");
+
+  const pairPage = await fetch(`${environment.runtime.origin}/pair.html?state=${"p".repeat(32)}`);
+  assert.equal(pairPage.status, 200);
+  assert.match(await pairPage.text(), /Pair Coach/u);
+  assert.equal(pairPage.headers.get("cross-origin-opener-policy"), "unsafe-none");
+
+  const unrelatedStatic = await fetch(`${environment.runtime.origin}/app.mjs`);
+  assert.equal(unrelatedStatic.status, 404);
 
   const health = await json(await fetch(`${environment.runtime.origin}/v1/health`));
   assert.equal(health.body.protocol, LOOPBACK_PROTOCOL);
@@ -298,7 +323,7 @@ test("strict Host, Origin, traversal, and symlink checks fail closed", async (t)
   assert.doesNotMatch(traversal.body, /package\.json|tmp/u);
 
   const escaped = await fetch(`${environment.runtime.origin}/escape.txt`);
-  assert.equal(escaped.status, 403);
+  assert.equal(escaped.status, 404);
   assert.doesNotMatch(await escaped.text(), /secret|outside|tmp/u);
 });
 
@@ -309,9 +334,10 @@ test("bootstrap keeps only bearer hashes and protected endpoints require the pro
   const created = await bootstrap(environment.runtime);
   assert.equal(created.status, 200);
   assert.equal(created.body.access_token, TOKEN);
-  assert.equal(environment.runtime.bearerHashes.length, 1);
-  assert.ok(Buffer.isBuffer(environment.runtime.bearerHashes[0]));
-  assert.notEqual(environment.runtime.bearerHashes[0].toString("utf8"), TOKEN);
+  assert.equal(environment.runtime.bearerGrants.length, 1);
+  assert.equal(environment.runtime.bearerGrants[0].origin, environment.runtime.origin);
+  assert.ok(Buffer.isBuffer(environment.runtime.bearerGrants[0].hash));
+  assert.notEqual(environment.runtime.bearerGrants[0].hash.toString("utf8"), TOKEN);
 
   const missingProtocol = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
     headers: { Authorization: `Bearer ${TOKEN}`, Origin: environment.runtime.origin },
@@ -324,6 +350,155 @@ test("bootstrap keeps only bearer hashes and protected endpoints require the pro
   }));
   assert.equal(badToken.status, 401);
   assert.equal(badToken.body.reason_code, "authentication_required");
+});
+
+test("expired bearer grants are purged and rejected", async (t) => {
+  let now = Date.parse("2026-08-11T08:00:00.000Z");
+  const environment = await fixture({
+    clock: () => now,
+    grantLifetimeMs: 5 * 60 * 1_000,
+  });
+  t.after(() => environment.close());
+
+  const created = await bootstrap(environment.runtime);
+  assert.equal(created.status, 200);
+  assert.equal(environment.runtime.bearerGrants.length, 1);
+  assert.equal(environment.runtime.bearerGrants[0].expiresAt, now + 5 * 60 * 1_000);
+
+  now += 5 * 60 * 1_000;
+  const expired = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  assert.equal(expired.status, 401);
+  assert.equal(expired.body.reason_code, "authentication_required");
+  assert.equal(environment.runtime.bearerGrants.length, 0);
+});
+
+test("a loopback-confirmed pairing grant is bound to the exact public Pages origin", async (t) => {
+  const environment = await fixture();
+  t.after(() => environment.close());
+
+  const directPublicBootstrap = await bootstrap(environment.runtime, PUBLIC_COACH_ORIGIN, {
+    grantOrigin: PUBLIC_COACH_ORIGIN,
+    fetchSite: "cross-site",
+  });
+  assert.equal(directPublicBootstrap.status, 403);
+  assert.equal(directPublicBootstrap.body.reason_code, "origin_not_allowed");
+  assert.equal(environment.runtime.bearerGrants.length, 0);
+
+  const paired = await bootstrap(environment.runtime, environment.runtime.origin, {
+    grantOrigin: PUBLIC_COACH_ORIGIN,
+    fetchSite: "same-origin",
+  });
+  assert.equal(paired.status, 200);
+  assert.equal(paired.body.access_token, TOKEN);
+  assert.equal(environment.runtime.bearerGrants.length, 1);
+  assert.equal(environment.runtime.bearerGrants[0].origin, PUBLIC_COACH_ORIGIN);
+  assert.ok(Buffer.isBuffer(environment.runtime.bearerGrants[0].hash));
+  assert.notEqual(environment.runtime.bearerGrants[0].hash.toString("utf8"), TOKEN);
+
+  const publicAdapters = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      Origin: PUBLIC_COACH_ORIGIN,
+      "Sec-Fetch-Site": "cross-site",
+      "X-Coach-Protocol": LOOPBACK_PROTOCOL,
+    },
+  }));
+  assert.equal(publicAdapters.status, 200);
+  assert.equal(publicAdapters.headers.get("access-control-allow-origin"), PUBLIC_COACH_ORIGIN);
+  assert.equal(publicAdapters.headers.get("access-control-expose-headers"), "Idempotency-Replayed");
+  assert.equal(publicAdapters.body.adapters.length, 6);
+
+  const replayedFromLoopback = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  assert.equal(replayedFromLoopback.status, 401);
+  assert.equal(replayedFromLoopback.body.reason_code, "authentication_required");
+
+  const maliciousOrigin = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      Origin: "https://attacker.example",
+      "Sec-Fetch-Site": "cross-site",
+      "X-Coach-Protocol": LOOPBACK_PROTOCOL,
+    },
+  }));
+  assert.equal(maliciousOrigin.status, 403);
+  assert.equal(maliciousOrigin.body.reason_code, "origin_not_allowed");
+  assert.equal(maliciousOrigin.headers.get("access-control-allow-origin"), null);
+});
+
+test("CORS preflight allows only the exact Pages origin, route method, headers and explicit PNA", async (t) => {
+  const environment = await fixture();
+  t.after(() => environment.close());
+
+  const allowed = await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: PUBLIC_COACH_ORIGIN,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "authorization, content-type, idempotency-key, x-coach-protocol",
+      "Access-Control-Request-Private-Network": "true",
+      "Sec-Fetch-Site": "cross-site",
+    },
+  });
+  assert.equal(allowed.status, 204);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), PUBLIC_COACH_ORIGIN);
+  assert.equal(allowed.headers.get("access-control-allow-methods"), "POST");
+  assert.equal(
+    allowed.headers.get("access-control-allow-headers"),
+    "authorization, content-type, idempotency-key, x-coach-protocol",
+  );
+  assert.equal(allowed.headers.get("access-control-allow-private-network"), "true");
+  assert.equal(allowed.headers.get("access-control-max-age"), "600");
+  assert.equal(
+    allowed.headers.get("vary"),
+    "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+  );
+
+  const withoutPnaRequest = await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    method: "OPTIONS",
+    headers: {
+      Origin: PUBLIC_COACH_ORIGIN,
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "authorization, x-coach-protocol",
+      "Sec-Fetch-Site": "cross-site",
+    },
+  });
+  assert.equal(withoutPnaRequest.status, 204);
+  assert.equal(withoutPnaRequest.headers.get("access-control-allow-methods"), "GET");
+  assert.equal(withoutPnaRequest.headers.get("access-control-allow-private-network"), null);
+
+  for (const [name, headers, expectedStatus] of [
+    ["malicious origin", {
+      Origin: "https://attacker.example",
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "authorization, x-coach-protocol",
+      "Sec-Fetch-Site": "cross-site",
+    }, 403],
+    ["wrong method", {
+      Origin: PUBLIC_COACH_ORIGIN,
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "authorization, x-coach-protocol",
+      "Sec-Fetch-Site": "cross-site",
+    }, 405],
+    ["unlisted header", {
+      Origin: PUBLIC_COACH_ORIGIN,
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "authorization, x-private-header",
+      "Sec-Fetch-Site": "cross-site",
+    }, 403],
+  ]) {
+    const rejected = await fetch(`${environment.runtime.origin}/v1/adapters`, {
+      method: "OPTIONS",
+      headers,
+    });
+    assert.equal(rejected.status, expectedStatus, name);
+    if (name === "malicious origin") {
+      assert.equal(rejected.headers.get("access-control-allow-origin"), null);
+    }
+  }
 });
 
 test("adapter discovery is package-aware and never selects Codex probe-only or Qoder without structured output", async (t) => {
@@ -364,6 +539,7 @@ test("adapter discovery is package-aware and never selects Codex probe-only or Q
     headers: baseHeaders(environment.runtime),
   }));
   assert.equal(response.status, 200);
+  assert.equal(response.body.adapters.length, 6);
   const byId = Object.fromEntries(response.body.adapters.map((adapter) => [adapter.id, adapter]));
   assert.equal(byId.codex.state, "probe_only");
   assert.equal(byId.codex.selectable, false);
@@ -374,6 +550,8 @@ test("adapter discovery is package-aware and never selects Codex probe-only or Q
   assert.equal(byId.codebuddy.state, "needs_configuration");
   assert.equal(byId.codebuddy.selectable, false);
   assert.equal(byId["claude-code"].state, "unavailable");
+  assert.equal(byId.hermes.state, "unavailable");
+  assert.equal(byId.hermes.selectable, false);
   assert.doesNotMatch(JSON.stringify(response.body), /private|secret|directory|path must/u);
 
   const preflight = await json(await fetch(`${environment.runtime.origin}/v1/adapters/qoder/preflight`, {
@@ -382,6 +560,42 @@ test("adapter discovery is package-aware and never selects Codex probe-only or Q
     body: "{}",
   }));
   assert.equal(preflight.body.adapter.selectable, false);
+});
+
+test("compatibility inspection and execution receive the same operator-owned host registry", async (t) => {
+  const hostRegistry = { resolve() { return null; } };
+  const inspectionRegistries = [];
+  const runnerRegistries = [];
+  const environment = await fixture({
+    hostRegistry,
+    inspectAdapter: async ({ hostRegistry: observedRegistry }) => {
+      inspectionRegistries.push(observedRegistry);
+      return readyInspection();
+    },
+    runnerFactory: ({ hostRegistry: observedRegistry }) => {
+      runnerRegistries.push(observedRegistry);
+      return {
+        async preflight() {},
+        async run() { return completedSubmitOutput(); },
+      };
+    },
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  const response = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "shared-registry-1",
+    },
+    body: JSON.stringify(submitBody()),
+  }));
+  assert.equal(response.status, 200);
+  assert.ok(inspectionRegistries.length >= 1);
+  assert.ok(inspectionRegistries.every((registry) => registry === hostRegistry));
+  assert.deepEqual(runnerRegistries, [hostRegistry]);
 });
 
 test("submit runs one schema-valid employee turn, sanitizes coaching, ignores events, and replays idempotently", async (t) => {
@@ -784,7 +998,7 @@ test("the real Web LocalAgentClient bootstraps with access_token and lists adapt
   assert.equal(connected.connected, true);
   assert.equal(connected.protocol, LOOPBACK_PROTOCOL);
   assert.equal(connected.instance_id, environment.runtime.instanceId);
-  assert.equal(connected.adapters.length, 5);
+  assert.equal(connected.adapters.length, 6);
   assert.equal(connected.adapters.find(({ id }) => id === "qwen-code").state, "ready");
   const coaching = await client.coach({
     phase: "submission",
@@ -797,10 +1011,10 @@ test("the real Web LocalAgentClient bootstraps with access_token and lists adapt
   assert.match(coaching.coaching_text, /different retest/u);
 });
 
-test("--open uses an argument array with shell disabled and only loopback URLs", () => {
+test("--open uses an argument array with shell disabled and only the exact public coach URL", () => {
   const calls = [];
   const child = { once() {}, unref() {} };
-  const opened = openRuntimeUrl("http://127.0.0.1:43127/", {
+  const opened = openRuntimeUrl(PUBLIC_COACH_URL, {
     platform: "darwin",
     spawnImpl(command, args, options) {
       calls.push({ command, args, options });
@@ -810,9 +1024,10 @@ test("--open uses an argument array with shell disabled and only loopback URLs",
   assert.equal(opened, true);
   assert.deepEqual(calls, [{
     command: "/usr/bin/open",
-    args: ["http://127.0.0.1:43127/"],
+    args: [PUBLIC_COACH_URL],
     options: { detached: true, shell: false, stdio: "ignore" },
   }]);
   assert.equal(openRuntimeUrl("https://example.com/", { spawnImpl: () => child }), false);
+  assert.equal(openRuntimeUrl("http://127.0.0.1:43127/", { spawnImpl: () => child }), false);
   assert.equal(openRuntimeUrl("http://127.0.0.1:80/", { spawnImpl: () => child }), false);
 });

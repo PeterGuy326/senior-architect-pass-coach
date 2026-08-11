@@ -10,19 +10,22 @@
 
 当前网页 MVP 先把最适合确定性闭环的**综合知识客观题**做好：每天最多 3 项，答对且明确“确定”才算掌握，猜对或不确定答对会进入复测。案例分析和论文会显示为“未测量”，不会假装已经支持。
 
-> 当前状态：零安装 Web Chatbot 是永远可用的基础模式；增强模式由一次下载、无需源码编译的 Local Agent Runtime 同源打开同一页面。学习档案、选题、可信判分和进度仍由浏览器 Harness 统一保管，Digital Employee `0.3.0` 只把提交后的个性化讲解或自然语言追问交给用户选择的兼容 Agent。切换引擎不会换老师、不会清空进度。
+> 当前状态：这个 GitHub Pages 页面是唯一的考生主入口。零安装的确定性私教永远可用；需要 Agent 讲解时，再启动一次下载、无需源码编译的 Local Agent Runtime，并在同一个公开页面显式配对。学习档案、选题、可信判分和进度始终由该 Pages Origin 的浏览器 Harness 统一保管，Digital Employee `0.3.0` 只把提交后的个性化讲解或自然语言追问交给用户选择的兼容 Agent。切换引擎不会换老师、不会清空进度。
 
 ## 使用本机 Agent 增强私教
 
 如果你希望老师不仅判题，还能结合既往弱项追问、换一种方式解释和给出针对性的补救动作，可从 [Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载对应系统的 **Local Agent Runtime**：
 
 1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
-2. Runtime 会在 `127.0.0.1` 打开同一套私教页面；点击页面顶部“连接本机 Agent”。
-3. 从 Runtime 实际检查通过的引擎中选择一个。之后的可信判分先在浏览器本地完成，Agent 只负责个性化讲解。
+2. Runtime 只在 `127.0.0.1:43127` 启动配对桥，并打开上面的公开 Pages；如果浏览器没有自动打开，也可手动回到同一个链接。
+3. 在 Pages 点击“连接本机 Agent”。浏览器会打开一个由本机 Runtime 提供的确认窗口；确认后回到原页面，并按浏览器提示允许访问本机网络。
+4. 从 Runtime 实际检查通过的引擎中选择一个。可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
 
-这是“下载应用并打开”，不是 clone 仓库、安装 npm 依赖或本地编译。当前预览包尚未做 Apple notarization；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。macOS 首次打开可先在 Finder 中右键选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。公开 GitHub Pages 不会在加载时扫描本机端口；正式 Agent 路径由 Runtime 同源托管页面，因此不依赖公网页面跨域访问 localhost。
+这是“下载应用并打开”，不是 clone 仓库、安装 npm 依赖或本地编译。当前预览包尚未做 Apple notarization；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。macOS 首次打开可先在 Finder 中右键选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。Pages 在加载时不会扫描本机端口；只有点击连接后才访问固定的 loopback 地址并请求浏览器许可。
 
-GitHub Pages 与 `127.0.0.1` 是两个浏览器 Origin，不能暗中互读 IndexedDB。已经在 Pages 学习的用户，第一次切到 Runtime 时请先在 Pages 点“导出”，再在 Runtime 页面点“导入”；之后在同一个 Runtime 页面切换任何 Agent 都不会丢档案。当前没有自动云同步，也不会假装两份档案已经合并。
+桌面 Chrome/Edge 是当前 Agent 配对主路径；浏览器可能显示本地网络访问许可，拒绝后仍可继续使用基础私教。Safari、Firefox 或受管浏览器若阻止公开 HTTPS 页面访问本机 HTTP loopback，会明确降级为 `content-only`，不会影响已有档案。手机上的 `127.0.0.1` 指向手机自身，不能连接电脑上的 Runtime，因此移动端同样使用基础私教。项目不会为了绕过这些限制而监听局域网地址。
+
+配对窗口与 Pages 虽然是两个 Origin，但它只负责确认授权，不保存也不迁移学习档案。短期 Bearer 通过精确来源校验的 `postMessage` 交给原 Pages 页面，随后仅留在 JavaScript 私有内存；题目、作答和进度仍在原 Pages Origin 的 IndexedDB，所以不再需要在两个页面之间导出、导入或合并档案。
 
 Digital Employee 当前的真实兼容边界如下：
 
@@ -33,6 +36,7 @@ Digital Employee 当前的真实兼容边界如下：
 | CodeBuddy | 可运行 Adapter | 需要 `2.106.4`、`CODEBUDDY_API_KEY` 与 `CODEBUDDY_MODEL` |
 | Qoder | 不兼容 | 当前 Adapter 不支持本员工包要求的结构化输出 |
 | Codex | 仅探测 | Digital Employee `0.3.0` 尚无可运行 Adapter |
+| Hermes Agent（Nous Research） | 仅探测 | 当前只检查 `hermes --version`；执行 Adapter 尚未实现，不能选择 |
 
 页面不会要求、接收或保存模型 API Key。首个预览版由 Runtime 启动时的本机环境提供对应服务凭证；框架 Adapter 不会冒充复用个人 CLI 登录态。已安装也不等于可用，页面只允许选择员工包级 preflight 通过的引擎。
 
@@ -141,7 +145,7 @@ npm run coach -- session start \
 
 CLI Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，并重新注入当前题目和批准材料。当前零安装网页使用同一套教学规则的浏览器 `content-only` Adapter；未来 IM 连接器可以复用机器轮次契约。
 
-Local Agent Runtime 采用 Hybrid Harness：出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。
+Local Agent Runtime 采用 Hybrid Harness：出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Runtime 的产品职责是 loopback 配对与执行，不拥有第二份网页档案。
 
 用户首先看到的是员工自己的名称、欢迎语和发布者声明；Digital Employee 作为基础设施归属，Qwen/Claude/CodeBuddy 等仅作为可替换 engine 出现在运行信息中。当前品牌 sidecar 是本项目的先行约定，通用 package presentation 已反馈到上游 [Issue #102](https://github.com/fullstack-ai-infra/digital-employee/issues/102)。
 
@@ -169,11 +173,12 @@ npm run coach -- validate-package --engine codex
 
 ```mermaid
 flowchart LR
-  A["GitHub Pages / Runtime 同源 UI"] --> B["Browser Conversation Harness"]
+  A["GitHub Pages · 唯一主入口"] --> B["Browser Conversation Harness"]
   B --> C["固定题库版本 + Worker 答案门"]
   B --> D["IndexedDB 私人进度"]
   B --> E["去标识化弱项 + 提交后可信判定"]
-  E --> F["127.0.0.1 Local Agent Runtime"]
+  A -. "显式确认 + 内存授权" .-> F["127.0.0.1 Local Agent Runtime"]
+  E --> F
   F --> G["Digital Employee 0.3.0"]
   G --> H["用户选择的 Claude / Qwen / CodeBuddy"]
   H --> I["有界 coaching text"]

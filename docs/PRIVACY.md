@@ -10,9 +10,13 @@
 
 用户显式连接 Local Agent Runtime 并选择兼容引擎时，本轮去标识化进度摘要、自然语言追问和必要的公开题面会交给所选 Agent Host 及其配置的模型服务；提交后，本地判题产生的作答、参考答案和解析也会作为受信材料进入该轮。是否离开本机取决于该 Host 的模型服务和账号配置。系统不会静默从 `content-only` 切换到模型模式，Agent 失败也不会改写或回滚浏览器进度。
 
-Runtime API 只监听 `127.0.0.1`。页面令牌只保存在当前 JavaScript 内存，不进入 URL、DOM、IndexedDB、localStorage、sessionStorage、导出档案或日志；Runtime 重启后失效。网页不能读取或提交模型 API Key，首个预览版只从 Runtime 启动环境读取 Adapter 所需服务凭证。Runtime 不持久化模型回复或建立第二份学习档案。
+Runtime API 只监听 `127.0.0.1`。Pages 加载时不会扫描本机端口；只有用户点击“连接本机 Agent”后，才会打开 Runtime 自己的确认页。bootstrap 只允许该 loopback 同源确认页调用，签发的 Bearer 绑定到精确的正式 Pages Origin；确认页通过带随机 state、精确目标 Origin 的 `postMessage` 发回授权，Pages 还会校验消息来源、窗口引用、协议版本、token 格式和 Runtime instance。后续 CORS 不使用 `*` 或 cookie credentials。
 
-GitHub Pages 与 Runtime 页面是不同 Origin，浏览器会隔离两边的 IndexedDB。项目不会绕过这个边界自动复制资料；用户可主动在 Pages 导出无题文档案，再在 Runtime 页面导入。当前没有双向同步或冲突合并。
+明文 Bearer 在浏览器侧只短暂经过确认页的 JavaScript 对象，之后只留在 Pages 的 JavaScript 私有字段；Runtime 只保留其摘要与绑定 Origin。它不进入 URL、DOM、IndexedDB、`localStorage`、`sessionStorage`、导出档案或日志，刷新页面或 Runtime 重启后失效。网页不能读取或提交模型 API Key，首个预览版只从 Runtime 启动环境读取 Adapter 所需服务凭证。Runtime 不持久化模型回复或建立第二份学习档案。
+
+GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的 IndexedDB。确认页不读取、复制或保存学习档案；所有题目、作答和进度继续保存在原 Pages Origin，因此 Agent 配对不需要档案导出、导入或合并。导出仍只用于用户主动备份或换浏览器。
+
+桌面 Chrome/Edge 是当前 Agent 配对主路径。Safari、Firefox、受管浏览器或移动端如果阻止公开 HTTPS 页面访问本机 HTTP loopback，会保留 `content-only`，不改写已有状态。移动设备的 `127.0.0.1` 指向设备自身，Runtime 也不会监听 LAN 地址来绕过浏览器和网络边界。
 
 `npm install` 会连接用户配置的 npm registry；这属于依赖安装，不是学习数据上传。`validate-package` 和 `eval-package` 本身离线运行，不调用模型。
 

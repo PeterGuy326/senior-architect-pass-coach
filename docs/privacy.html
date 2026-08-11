@@ -65,14 +65,25 @@
 
       <h2>连接本机 Agent 后</h2>
       <p>
-        Runtime 只监听 <code>127.0.0.1</code>，并由它同源打开这套页面。切换 Claude、Qwen、
-        CodeBuddy 或退回基础私教，不会更换浏览器里的档案，也不会让模型获得写进度的权限。
-        页面访问 Runtime 的短期令牌只在内存中存在，不进入 URL、DOM、站点存储、导出文件或日志。
+        公开 Pages 始终是学习主页面。Runtime 只监听 <code>127.0.0.1</code>；只有你点击连接后，
+        浏览器才打开 Runtime 自己的确认窗口并请求本地网络访问许可。确认窗口不能读取学习档案，
+        只向发起连接的 Pages 窗口返回一份绑定到精确来源的短期授权。
+      </p>
+      <p>
+        明文 Bearer 在浏览器侧只短暂经过确认页的 JavaScript 对象，之后只留在 Pages 的 JavaScript
+        私有字段；Runtime 只保留其摘要与绑定 Origin。它不进入 URL、DOM、IndexedDB、
+        <code>localStorage</code>、<code>sessionStorage</code>、导出文件或日志；刷新页面或重启 Runtime
+        后需要重新确认。后续接口只接受精确的正式 Pages Origin，不使用 wildcard CORS 或 cookie。
+        切换 Claude、Qwen、CodeBuddy 或退回基础私教，不会更换浏览器里的档案，也不会让模型获得写进度的权限。
       </p>
       <p>
         为生成个性化讲解，本轮公开题面、作答、可信答案解析和去标识化弱项摘要可能会交给所选
         Agent Host 及其模型服务；自然语言追问也会发送。姓名、账号、浏览器档案原文、本地路径和
         API Key 不会进入员工包输入。模型服务自身如何处理请求，仍受用户配置的服务条款约束。
+      </p>
+      <p>
+        桌面 Chrome/Edge 是当前 Agent 配对主路径。Safari、Firefox、受管浏览器或移动设备如果不允许
+        公开 HTTPS 页面访问本机 HTTP loopback，会继续使用基础私教；项目不会改为监听局域网地址来绕过限制。
       </p>
 
       <h2>题库从哪里来</h2>

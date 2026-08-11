@@ -56,7 +56,7 @@ try {
         redirect: "error",
       });
       const body = await response.json();
-      if (response.ok && body?.protocol === "coach-loopback.v1" && body?.status === "ready") {
+      if (response.ok && body?.protocol === "coach-loopback.v2" && body?.status === "ready") {
         ready = true;
         break;
       }

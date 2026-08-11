@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import {
   createLocalAgentRuntime,
   DEFAULT_LOOPBACK_PORT,
+  PUBLIC_COACH_URL,
 } from "./local-agent-runtime.mjs";
 
 function parsePort(value) {
@@ -21,9 +22,10 @@ export function openRuntimeUrl(
   url,
   { platform = process.platform, spawnImpl = spawn } = {},
 ) {
-  if (typeof url !== "string" || !/^http:\/\/127\.0\.0\.1:\d{1,5}\/$/u.test(url)) return false;
-  const port = Number(new URL(url).port);
-  if (!Number.isInteger(port) || port < 1_024 || port > 65_535) return false;
+  // `--open` is deliberately not a general-purpose URL launcher. Keeping an
+  // exact allowlist prevents Runtime output or command-line input from being
+  // turned into an arbitrary shell/browser target.
+  if (url !== PUBLIC_COACH_URL) return false;
   const command = platform === "darwin"
     ? "/usr/bin/open"
     : (platform === "linux" ? "xdg-open" : null);
@@ -76,9 +78,10 @@ export async function main(argumentsList = process.argv.slice(2)) {
   const runtime = createLocalAgentRuntime({ port });
   try {
     const started = await runtime.start();
-    process.stdout.write(`架构过线私教已在本机启动：${started.url}\n`);
-    process.stdout.write("学习档案仍只保存在浏览器；按 Ctrl+C 停止本机 Agent Runtime。\n");
-    if (values.open) openRuntimeUrl(started.url);
+    process.stdout.write(`本机 Agent 配对桥已启动：${started.url}\n`);
+    process.stdout.write(`私教主入口：${PUBLIC_COACH_URL}\n`);
+    process.stdout.write("学习档案仍保存在公开私教页面的浏览器存储；按 Ctrl+C 停止本机 Runtime。\n");
+    if (values.open) openRuntimeUrl(PUBLIC_COACH_URL);
   } catch {
     process.stderr.write("本机 Agent Runtime 启动失败；请确认端口未被占用且发布包完整。\n");
     process.exitCode = 1;
