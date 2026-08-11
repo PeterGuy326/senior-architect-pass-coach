@@ -311,6 +311,7 @@ test("Runtime bearer stays inside client memory and is absent from URLs, bodies,
   for (const call of calls) {
     assert.equal(call.url.includes(token), false);
     assert.equal(String(call.options.body || "").includes(token), false);
+    assert.equal(Object.hasOwn(call.options, "targetAddressSpace"), false);
     assert.equal(call.options.credentials, "omit");
     assert.equal(call.options.cache, "no-store");
     assert.equal(call.options.headers["X-Coach-Protocol"], LOOPBACK_PROTOCOL);
