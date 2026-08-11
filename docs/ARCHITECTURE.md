@@ -1,6 +1,6 @@
 # 架构与信任边界
 
-第一版有两个运行入口：无需安装的静态 Web Chatbot，以及面向开发者和连接器的本地 Node CLI Conversation Harness。它们共享 45/52、每日最多 3 项、三态判分和答案门规则，但使用各自适合的可信存储边界；当前不是多用户在线平台。
+产品有三个入口：无需安装的静态 Web Chatbot、同源托管同一页面的 Local Agent Runtime，以及面向开发者和连接器的本地 Node CLI Conversation Harness。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
 
 ## 组件
 
@@ -10,7 +10,24 @@
 
 个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。刷新时只读恢复档案和派生进度，不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
 
-Web 入口不运行 Agent Host，也不要求 API Key。Digital Employee 在这一入口中提供员工身份、契约和 CI 归属，而不是被虚构成浏览器内模型运行时。
+直接从 GitHub Pages 打开时不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；基础私教在 Runtime 不存在、断开或模型失败时仍可完整出题、判分和保存进度。
+
+### Local Agent Runtime
+
+Runtime 只绑定 `127.0.0.1`，并同源托管 `docs/` 页面。页面在用户显式点击后获得仅存于内存的短期 Bearer，再读取员工包级 Adapter preflight；浏览器不能提交命令、路径、环境变量、模型密钥或用户身份。Codex 的 probe-only、Qoder 的结构化输出不兼容、缺少凭证与真正可选状态分别展示，不能把“安装了 CLI”冒充成“可以运行”。
+
+Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
+
+1. Browser Harness 仍是档案、选题、可信判分、attempt 和派生进度的唯一写入者；
+2. 出题不调用模型，提交前不向 Agent 请求答案；
+3. 提交后先在一个 IndexedDB 事务中保存可信判分和进度；
+4. 再把当前公开题面、可信判定与去标识化学习摘要发给 Runtime；
+5. Runtime 通过 Digital Employee 的 one-shot Host 执行员工包，完整验证输出后只返回有界的 `teaching_result.summary`；
+6. 模型失败只会缺少本轮生成式讲解，不会回滚、重复或改写已经提交的进度。
+
+Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Harness。切换 Claude、Qwen、CodeBuddy 或退回 `content-only` 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。自然语言追问同样只读取有界上下文，不具有进度写权限。
+
+GitHub Pages 与 `127.0.0.1` 是不同 Origin，因此各自拥有独立 IndexedDB。首次从 Pages 迁移到 Runtime 必须由用户主动导出、导入无题文档案；系统不会尝试跨 Origin 偷读或声称已经同步。迁移后，各 Agent 都在同一个 Runtime Origin 上复用同一档案。
 
 ### `progress_engine/`
 
@@ -38,7 +55,7 @@ Web 入口不运行 Agent Host，也不要求 API Key。Digital Employee 在这�
 
 ## CLI 会话与渠道
 
-CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。静态 Web 使用独立的浏览器存储 Adapter，不冒充具备服务端认证语义的渠道入口。
+CLI REPL 和 `session turn --json` 都调用同一个 `LearningConversationHarness`。机器入口额外要求 session revision、active item 和渠道 delivery turn ID，并持久化有界请求摘要/结果收据；未来钉钉、飞书 Adapter 只负责认证、标准化消息和渲染，不拥有学习流程。静态 Web 和 Local Agent UI 使用同一个浏览器存储 Adapter，不冒充具备服务端认证语义的渠道入口。Local Agent Bridge 是只读 coaching 执行层，不接管或复制浏览器档案。
 
 Digital Employee `0.3.0` 的 Agent-native Host 是 one-shot。Harness 因此不依赖 Host session，而在每轮显式重新注入：
 
@@ -66,7 +83,7 @@ evaluation_started → commit_started → feedback
 
 本项目采用通用推荐、授权、结果三态思想：
 
-- 推荐：确定性引擎决定“下一步最值得学什么”；当前可见反馈来自受信题库解析，Agent Host 只做协议一致性实验；
+- 推荐：确定性引擎决定“下一步最值得学什么”；可信反馈来自受信题库解析，Agent 只补充不改变排课的个性化 coaching text；
 - 授权：匿名只能通用诊断，个人状态需要本地授权；
 - 结果：智能体只能返回完成、需要补充或拒绝，不能声称已经改变状态。
 
@@ -88,8 +105,9 @@ Harness 与 Workbench 在调用员工包前生成两份对象：
 - 多用户注册、登录、租户隔离和服务端数据库；
 - 云同步、服务端 API 与运营后台；
 - 钉钉、飞书的正式 Adapter；
-- 浏览器内生成式讲解或托管 Agent Host；
 - 托管 Agent Host 和线上模型凭证管理；
+- 无安装的浏览器内模型执行；Local Agent 必须运行用户明确启动的本机 Runtime；
+- 已签名、notarized 与自动更新的正式桌面安装器（当前 Release 是无需编译的预览包）；
 - 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
 - Codex 可运行 Adapter（当前仅 probe-only）。
 

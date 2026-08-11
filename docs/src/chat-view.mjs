@@ -148,8 +148,10 @@ export function createChatView({
   if (!(timeline instanceof HTMLElement)) throw new TypeError("timeline is required");
 
   const renderedKeys = new Set();
+  const renderedAgentKeys = new Set();
   let selected = new Set();
   let currentQuestion = null;
+  let agentChatAvailable = false;
 
   function appendMessage(role, { paragraphs = [], question, annotation, action } = {}) {
     const item = node("li", `message message--${role}`);
@@ -210,6 +212,7 @@ export function createChatView({
     replaceChildren(optionPanel);
     optionPanel.hidden = true;
     renderedKeys.clear();
+    renderedAgentKeys.clear();
     selected = new Set();
     currentQuestion = null;
   }
@@ -226,7 +229,9 @@ export function createChatView({
     submitButton.textContent = answering ? "交卷" : "发送";
     input.placeholder = answering
       ? "输入 A–H；多选可输入 AC 或 A,C"
-      : "输入：今天学什么 / 查看进度 / 继续 / 出题";
+      : agentChatAvailable
+        ? "向专属私教提问，或输入：查看进度 / 继续 / 出题"
+        : "输入：今天学什么 / 查看进度 / 继续 / 出题";
     input.setAttribute("aria-label", answering ? "输入 A 到 H 的答案，可输入多个选项" : "输入学习指令");
   }
 
@@ -236,6 +241,10 @@ export function createChatView({
       button.setAttribute("aria-pressed", selected.has(button.dataset.option) ? "true" : "false");
     }
     input.value = [...selected].sort().join("");
+  }
+
+  function setAgentChatAvailable(value) {
+    agentChatAvailable = value === true;
   }
 
   function renderOptions(question) {
@@ -329,6 +338,7 @@ export function createChatView({
     const state = asText(view.state, "ready");
     const key = `${state}:${asText(view.revision, "0")}:${asText(view.question?.item_id ?? view.feedback?.grade?.item_id)}`;
     if (!force && renderedKeys.has(key)) {
+      renderAgentResult(view);
       setComposer({ enabled: true, answering: state === "awaiting_answer", busy: BUSY_STATES.has(state) });
       return;
     }
@@ -375,7 +385,30 @@ export function createChatView({
       setComposer({ enabled: true });
     }
 
+    renderAgentResult(view);
+
     setStatus(view.error ? "本轮未写入新进度。" : `本地档案 · revision ${asText(view.revision, "—")}` , state);
+  }
+
+  function renderAgentResult(view) {
+    if (view?.state !== "feedback") return;
+    const coaching = view?.agent?.coaching;
+    const failure = view?.agent?.failure;
+    if (coaching?.coaching_text) {
+      const engine = asText(coaching.engine ?? view.agent?.preference, "本机 Agent").slice(0, 64);
+      const text = asText(coaching.coaching_text).slice(0, 2_000);
+      const key = `coaching:${asText(view.revision)}:${engine}:${text}`;
+      if (renderedAgentKeys.has(key)) return;
+      renderedAgentKeys.add(key);
+      appendCoach([text], { annotation: `讲解引擎 ${engine} · 判分固定答案键` });
+    } else if (failure?.message) {
+      const engine = asText(view.agent?.preference, "本机 Agent").slice(0, 64);
+      const message = asText(failure.message).slice(0, 240);
+      const key = `failure:${asText(view.revision)}:${engine}:${message}`;
+      if (renderedAgentKeys.has(key)) return;
+      renderedAgentKeys.add(key);
+      appendSystem(`讲解引擎 ${engine} 暂时不可用：${message} 固定答案批改与学习进度已经保存，不会回滚。`);
+    }
   }
 
   function progressSummary(view) {
@@ -406,6 +439,7 @@ export function createChatView({
     progressSummary,
     renderState,
     setComposer,
+    setAgentChatAvailable,
     setSelected,
     setStatus,
     taskSummaryCopy,

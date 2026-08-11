@@ -33,6 +33,8 @@ export const WEB_HARNESS_STATES = Object.freeze({
 });
 
 const CONFIDENCE = new Set(["guess", "unsure", "sure"]);
+const AGENT_ENGINE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+const MAX_AGENT_TEXT = 2_000;
 const FORBIDDEN_PUBLIC_KEYS = new Set([
   "answer", "correct_answer", "reference_answer", "explanation", "analysis", "feedback", "result",
 ]);
@@ -68,6 +70,17 @@ function safeError(error) {
       ? error.message
       : "私人老师暂时无法继续，请重试。",
   };
+}
+
+function safeAgentText(value, maximum = MAX_AGENT_TEXT) {
+  if (typeof value !== "string") return "";
+  const result = value
+    .replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)?)/gu, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, "")
+    .replace(/[\u202A-\u202E\u2066-\u2069]/gu, "")
+    .trim()
+    .slice(0, maximum);
+  return /[\uD800-\uDBFF]$/u.test(result) ? result.slice(0, -1) : result;
 }
 
 function assertNoAnswer(value) {
@@ -210,7 +223,17 @@ function validateRestorableSession(session) {
 }
 
 export class BrowserCoachHarness {
-  constructor({ store, worker, curriculum = null, curriculumLoader = null, clock, idFactory = defaultId, ownsWorker = false } = {}) {
+  constructor({
+    store,
+    worker,
+    curriculum = null,
+    curriculumLoader = null,
+    clock,
+    idFactory = defaultId,
+    ownsWorker = false,
+    agentClient = null,
+    agentEngine = "content-only",
+  } = {}) {
     if (!store?.initialize || !store?.commitAttempt) throw new TypeError("coach_store_required");
     if (!worker) throw new TypeError("content_worker_required");
     this.store = store;
@@ -229,8 +252,34 @@ export class BrowserCoachHarness {
     this.state = WEB_HARNESS_STATES.READY;
     this.message = "尚未读取本浏览器的学习进度。";
     this.lastError = null;
+    this.agentClient = null;
+    this.agentEngine = "content-only";
+    this.agentCoaching = null;
+    this.agentFailure = null;
     this.requestCounter = 0;
     this.unsubscribeStore = this.store.subscribe?.(() => {});
+    this.setAgentClient(agentClient);
+    this.setAgentPreference(agentEngine);
+  }
+
+  setAgentClient(client) {
+    if (client !== null && typeof client?.coach !== "function") throw new TypeError("agent_client_coach_required");
+    this.agentClient = client;
+    this.#clearAgentTurn();
+    return this.getView();
+  }
+
+  setAgentPreference(engine = "content-only") {
+    if (typeof engine !== "string" || !AGENT_ENGINE.test(engine)) {
+      throw coachError("INVALID_AGENT_ENGINE", "Agent 引擎标识无效。");
+    }
+    this.agentEngine = engine;
+    this.#clearAgentTurn();
+    return this.getView();
+  }
+
+  getAgentPreference() {
+    return this.agentEngine;
   }
 
   async initialize({ examDate = null, dailyMinutes = 45 } = {}) {
@@ -248,6 +297,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
     const summary = progressSummary(this.progress);
@@ -280,6 +330,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
     const summary = progressSummary(progress);
@@ -330,6 +381,7 @@ export class BrowserCoachHarness {
     this.state = this.session.state;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     if (!tasks.length) {
       this.message = "当前没有可安全解析的综合知识任务。";
       return this.#emit();
@@ -348,7 +400,7 @@ export class BrowserCoachHarness {
       throw coachError("STALE_VIEW", "页面题目或版本已经过期，请刷新后继续。");
     }
     this.state = WEB_HARNESS_STATES.EVALUATING;
-    this.message = "正在使用固定答案键判定，本轮不会调用模型。";
+    this.message = "正在使用固定答案键判定；如已连接 Agent，讲解会在进度提交后生成。";
     this.#emit();
     try {
       const result = await this.#workerRequest("grade", {
@@ -395,6 +447,30 @@ export class BrowserCoachHarness {
         : (grade.result === "needs_retest"
           ? "答案正确但把握不足，记为 needs_retest，稍后再测。"
           : "这题尚未掌握，已进入优先复习队列。");
+      const committedView = this.#emit();
+      if (!this.#agentEnabled()) return committedView;
+      try {
+        const coaching = await this.agentClient.coach({
+          phase: "submission",
+          engine: this.agentEngine,
+          publicQuestion: clone(this.question),
+          trustedGrade: clone(grade),
+          deidentifiedProgress: this.#deidentifiedProgress(task.topic_id),
+        });
+        const coachingText = safeAgentText(coaching?.coaching_text);
+        if (!coachingText) throw coachError("EMPTY_AGENT_COACHING", "Agent 没有返回可显示的讲解。");
+        this.agentCoaching = {
+          coaching_text: coachingText,
+          engine: safeAgentText(coaching?.engine, 64) || this.agentEngine,
+        };
+        this.agentFailure = null;
+      } catch (error) {
+        this.agentCoaching = null;
+        this.agentFailure = {
+          code: safeAgentText(error?.code, 80) || "AGENT_COACHING_FAILED",
+          message: safeAgentText(error?.message, 240) || "Agent 讲解暂时不可用，已保留固定答案批改结果。",
+        };
+      }
       return this.#emit();
     } catch (error) {
       return this.#fail(error);
@@ -422,6 +498,7 @@ export class BrowserCoachHarness {
     this.session = await this.store.putSession(next, { expectedRevision: this.session.revision });
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.state = this.session.state;
     if (complete) {
       this.message = "今天最多 3 项已经完成。到此为止，留出精力稳定过线。";
@@ -441,6 +518,35 @@ export class BrowserCoachHarness {
     this.profile = await this.store.getProfile();
     this.progress = await this.store.getProgress();
     return this.getView();
+  }
+
+  async askAgent(message) {
+    const text = safeAgentText(message);
+    if (!text) throw coachError("EMPTY_CHAT_MESSAGE", "请输入要问私教的问题。");
+    if (!this.#agentEnabled()) {
+      throw coachError("AGENT_NOT_SELECTED", "请先连接本机 Runtime，并选择一个可用 Agent 引擎。");
+    }
+    try {
+      const result = await this.agentClient.coach({
+        phase: "chat",
+        engine: this.agentEngine,
+        message: text,
+        publicQuestion: this.question ? clone(this.question) : null,
+        trustedGrade: this.state === WEB_HARNESS_STATES.FEEDBACK && this.feedback ? clone(this.feedback) : null,
+        deidentifiedProgress: this.#deidentifiedProgress(this.session?.tasks?.[this.session.cursor]?.topic_id),
+      });
+      const coachingText = safeAgentText(result?.coaching_text);
+      if (!coachingText) throw coachError("EMPTY_AGENT_COACHING", "Agent 没有返回可显示的回答。");
+      return Object.freeze({
+        coaching_text: coachingText,
+        engine: safeAgentText(result?.engine, 64) || this.agentEngine,
+      });
+    } catch (error) {
+      throw coachError(
+        safeAgentText(error?.code, 80) || "AGENT_CHAT_FAILED",
+        safeAgentText(error?.message, 240) || "Agent 对话暂时不可用，学习进度没有改变。",
+      );
+    }
   }
 
   getView() {
@@ -466,6 +572,12 @@ export class BrowserCoachHarness {
       totalTasks: this.session?.tasks?.length || 0,
       message: this.message,
       error: this.lastError,
+      agent: {
+        preference: this.agentEngine,
+        connected: Boolean(this.agentClient?.connected),
+        coaching: this.agentCoaching,
+        failure: this.agentFailure,
+      },
     });
   }
 
@@ -486,6 +598,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
     this.message = "本地学习进度已导入；题库正文和答案没有写入导出文件。";
@@ -499,6 +612,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
     this.message = "已清除本浏览器中的私人学习数据。我现在不知道你的进度，重新开始会先诊断。";
@@ -510,6 +624,66 @@ export class BrowserCoachHarness {
     this.listeners.clear();
     if (this.ownsWorker) this.worker.terminate?.();
     this.store.close?.();
+  }
+
+  #agentEnabled() {
+    return this.agentEngine !== "content-only" && Boolean(this.agentClient?.connected) && typeof this.agentClient?.coach === "function";
+  }
+
+  #clearAgentTurn() {
+    this.agentCoaching = null;
+    this.agentFailure = null;
+  }
+
+  #deidentifiedProgress(currentTopic = null) {
+    const summary = progressSummary(this.progress || createBlankProgress({ now: nowFrom(this.clock) }));
+    const subjectProgress = (subject) => {
+      const value = summary.subjects?.[subject] || {};
+      const evidenceCount = Math.max(0, Number(value.evidence_count || 0));
+      return {
+        status: safeAgentText(value.status, 64) || "unmeasured",
+        latest_mock_score: typeof value.latest_mock_score === "number" && Number.isFinite(value.latest_mock_score)
+          ? value.latest_mock_score
+          : null,
+        lower_bound_score: typeof value.lower_bound_score === "number" && Number.isFinite(value.lower_bound_score)
+          ? value.lower_bound_score
+          : null,
+        evidence_level: evidenceCount > 0 ? "observed" : "cold_start",
+        evidence_count: evidenceCount,
+      };
+    };
+    const recommendations = (this.session?.tasks || [])
+      .slice(this.session?.cursor || 0, (this.session?.cursor || 0) + 3)
+      .map((task) => {
+        const topic = this.progress?.topics?.[task.topic_id];
+        const mastery = Number(topic?.mastery?.recognition?.mastery);
+        const reviewDue = task.review_due === true || task.action === "review" || task.action === "retest";
+        return {
+          topic_id: safeAgentText(task.topic_id, 128),
+          subject: "comprehensive",
+          skill: "recognition",
+          priority_score: null,
+          mastery: Number.isFinite(mastery) ? mastery : null,
+          review_due: reviewDue,
+          estimated_minutes: Number.isFinite(Number(task.minutes)) ? Number(task.minutes) : null,
+          reason_code: task.action === "diagnose" ? "cold_start" : (reviewDue ? "review_due" : "pass_priority"),
+        };
+      })
+      .filter((item) => item.topic_id);
+    let daysToExam = null;
+    if (typeof this.profile?.exam_date === "string") {
+      const milliseconds = Date.parse(`${this.profile.exam_date}T00:00:00.000Z`) - Date.parse(nowFrom(this.clock));
+      if (Number.isFinite(milliseconds)) daysToExam = Math.max(0, Math.ceil(milliseconds / 86_400_000));
+    }
+    return {
+      schema_version: "deidentified-progress.v1",
+      subjects: Object.fromEntries(["comprehensive", "case", "essay"].map((subject) => [subject, subjectProgress(subject)])),
+      target_subject: "comprehensive",
+      maintenance_subject: null,
+      crunch_mode: daysToExam !== null && daysToExam <= 3,
+      days_to_exam: daysToExam,
+      recommendations,
+    };
   }
 
   async #getUniqueActiveSession() {
@@ -529,6 +703,7 @@ export class BrowserCoachHarness {
     this.session = session;
     this.question = null;
     this.feedback = null;
+    this.#clearAgentTurn();
     this.lastError = null;
     const task = session.tasks[session.cursor];
 
@@ -640,6 +815,7 @@ export class BrowserCoachHarness {
       this.session = await this.store.putSession(awaiting, { expectedRevision: this.session.revision });
       this.question = question;
       this.feedback = null;
+      this.#clearAgentTurn();
       this.state = WEB_HARNESS_STATES.AWAITING_ANSWER;
       this.lastError = null;
       this.message = `${task.name || task.topic_id}：先独立作答，再看参考答案。`;

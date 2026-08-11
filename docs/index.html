@@ -8,7 +8,7 @@
     <meta name="referrer" content="no-referrer">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
     >
     <meta
       name="description"
@@ -112,7 +112,10 @@
         <div class="truth-strip" aria-label="运行方式说明">
           <span>仅存此浏览器</span>
           <span>固定公开题库版本</span>
-          <span>无模型 · 无 API Key</span>
+          <button class="engine-trigger" id="engine-trigger" type="button" aria-haspopup="dialog">
+            <span id="engine-trigger-label">基础私教 · 连接本机 Agent</span>
+            <span aria-hidden="true">⌄</span>
+          </button>
         </div>
 
         <section class="chat-sheet" aria-label="私教对话">
@@ -153,20 +156,19 @@
               </label>
             </fieldset>
             <div class="answer-row">
-              <label class="sr-only" for="answer-input">输入 A 到 H 中的选项</label>
-              <input
+              <label class="sr-only" for="answer-input">输入 A 到 H 中的选项，或向已连接的 Agent 提问</label>
+              <textarea
                 id="answer-input"
                 name="answer"
-                type="text"
-                maxlength="15"
+                maxlength="2000"
+                rows="1"
                 autocomplete="off"
                 autocapitalize="characters"
                 spellcheck="false"
-                inputmode="text"
                 placeholder="输入 A–H；多选可输入 AC 或 A,C"
                 aria-describedby="answer-hint answer-error"
                 disabled
-              >
+              ></textarea>
               <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
             </div>
             <p class="answer-hint" id="answer-hint">选答案前不会显示正确项和解析。</p>
@@ -206,18 +208,51 @@
           <code class="commit-slip">88f4bdc5…129edd1</code>
         </section>
 
-        <section class="margin-note">
+        <section class="margin-note" id="runtime-boundary">
           <p class="margin-note__title">本版边界</p>
-          <ul>
+          <ul id="runtime-boundary-list">
             <li>只练综合知识客观题</li>
-            <li>不调用大模型</li>
-            <li>不要求任何 API Key</li>
-            <li>Digital Employee 只负责契约基础设施</li>
+            <li>基础私教无需模型或 API Key</li>
+            <li>Agent 只做提交后讲解与对话</li>
+            <li>判分与进度始终由本地 Harness 掌管</li>
           </ul>
           <a href="./privacy.html">数据与隐私说明</a>
         </section>
       </aside>
     </main>
+
+    <dialog class="engine-dialog" id="engine-dialog" aria-labelledby="engine-dialog-title">
+      <div class="engine-dialog__header">
+        <div>
+          <p class="folio">讲解引擎</p>
+          <h2 id="engine-dialog-title">给私教换一支笔，不换学习档案</h2>
+        </div>
+        <form method="dialog">
+          <button class="dialog-close" type="submit" aria-label="关闭引擎选择">×</button>
+        </form>
+      </div>
+      <p class="engine-dialog__intro" id="runtime-context">
+        基础私教始终可用。Agent 只接收当前公开题面、可信判分和去身份化进度摘要；切换引擎不会清空题目或学习记录。
+      </p>
+      <div class="runtime-callout" id="runtime-callout">
+        <p id="runtime-callout-copy">当前是公开网页：不会扫描或连接 localhost。要用 Agent，请安装并从本机 Runtime 打开同一页面。</p>
+        <a
+          class="source-link"
+          id="runtime-install-link"
+          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases"
+          rel="noreferrer"
+        >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
+        <button class="secondary-action" id="runtime-connect" type="button" hidden>显式连接本机 Runtime</button>
+      </div>
+      <div class="engine-list" id="engine-list" aria-label="可选讲解引擎">
+        <button class="engine-card" type="button" data-engine="content-only" data-engine-state="ready" aria-pressed="true">
+          <span class="engine-card__title">基础私教</span>
+          <span class="engine-card__state">始终可用</span>
+          <span class="engine-card__detail">固定题库、固定答案键、浏览器私人进度；不调用模型。</span>
+        </button>
+      </div>
+      <p class="engine-dialog__foot" id="engine-dialog-status" role="status">当前：基础私教</p>
+    </dialog>
 
     <footer class="site-footer">
       <p>系统架构设计师过线私教 · 开源实践案例</p>

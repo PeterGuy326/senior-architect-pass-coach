@@ -2,13 +2,17 @@
 
 ## 默认不收集
 
-当前版本没有遥测、云端账号或服务端接口。网页 `content-only` 不上传用户问题、答案、错题或学习状态；任务安排、判分与进度写入都在浏览器内完成。浏览器会从 `raw.githubusercontent.com` 读取固定 commit 的公开题库文件，因此 GitHub 作为内容托管方会看到普通网络请求元数据（例如 IP、User-Agent）；请求不携带私人档案、作答或学习进度，也不使用 GitHub API。
+当前版本没有遥测、云端账号或项目自建的云端学习接口。网页 `content-only` 不上传用户问题、答案、错题或学习状态；任务安排、判分与进度写入都在浏览器内完成。浏览器会从 `raw.githubusercontent.com` 读取固定 commit 的公开题库文件，因此 GitHub 作为内容托管方会看到普通网络请求元数据（例如 IP、User-Agent）；请求不携带私人档案、作答或学习进度，也不使用 GitHub API。
 
 网页的个人档案、派生进度、无题文作答证据和最小会话状态只存于当前站点的 IndexedDB。网页不持久化题干、选项、原始 response、参考答案或解析；Service Worker 只缓存本项目同源静态文件，不缓存外部题库正文。用户可以主动导出/导入无题文 JSON 档案，或在页面中一键清除当前浏览器数据。
 
 纯静态网页只能提供教学体验上的答案门：作答前不把答案放进页面 DOM 或主线程状态。它无法阻止设备所有者用开发者工具查看网络响应或修改 IndexedDB，因此不把客户端存储宣称为防篡改、认证或真正的答案保密边界；若未来需要这些能力，必须引入明确披露的服务端。
 
-用户显式选择 `agent-host` 时，本轮去标识化输入、公开题面与作答会交给所选 Agent Host 及其配置的模型服务；提交后，本地判题产生的参考答案和解析也会作为受信材料进入该轮。是否离开本机取决于该 Host 的部署和账号配置；CLI 不会静默从 `content-only` 切换到模型模式。
+用户显式连接 Local Agent Runtime 并选择兼容引擎时，本轮去标识化进度摘要、自然语言追问和必要的公开题面会交给所选 Agent Host 及其配置的模型服务；提交后，本地判题产生的作答、参考答案和解析也会作为受信材料进入该轮。是否离开本机取决于该 Host 的模型服务和账号配置。系统不会静默从 `content-only` 切换到模型模式，Agent 失败也不会改写或回滚浏览器进度。
+
+Runtime API 只监听 `127.0.0.1`。页面令牌只保存在当前 JavaScript 内存，不进入 URL、DOM、IndexedDB、localStorage、sessionStorage、导出档案或日志；Runtime 重启后失效。网页不能读取或提交模型 API Key，首个预览版只从 Runtime 启动环境读取 Adapter 所需服务凭证。Runtime 不持久化模型回复或建立第二份学习档案。
+
+GitHub Pages 与 Runtime 页面是不同 Origin，浏览器会隔离两边的 IndexedDB。项目不会绕过这个边界自动复制资料；用户可主动在 Pages 导出无题文档案，再在 Runtime 页面导入。当前没有双向同步或冲突合并。
 
 `npm install` 会连接用户配置的 npm registry；这属于依赖安装，不是学习数据上传。`validate-package` 和 `eval-package` 本身离线运行，不调用模型。
 

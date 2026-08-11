@@ -1,4 +1,4 @@
-const CACHE_NAME = "architect-pass-coach-pages-v2";
+const CACHE_NAME = "architect-pass-coach-pages-v3";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const CORE_ASSETS = Object.freeze([
   "./src/app.mjs",
   "./src/chat-view.mjs",
   "./src/harness.mjs",
+  "./src/local-agent-client.mjs",
   "./src/indexeddb-store.mjs",
   "./src/progress-rules.mjs",
   "./src/content-worker.mjs",
@@ -40,6 +41,7 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith("/v1/")) return;
 
   event.respondWith(
     fetch(request)

@@ -1,5 +1,6 @@
 import { createWebCoachHarness } from "./harness.mjs";
 import { createChatView } from "./chat-view.mjs";
+import { createLocalAgentClient, isLocalAgentRuntimeOrigin } from "./local-agent-client.mjs";
 
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const ANSWER_LABELS = /^[A-H]+$/u;
@@ -23,6 +24,14 @@ const elements = Object.freeze({
   createProfile: document.querySelector("#create-profile"),
   importFile: document.querySelector("#import-file"),
   todayDate: document.querySelector("#today-date"),
+  engineTrigger: document.querySelector("#engine-trigger"),
+  engineTriggerLabel: document.querySelector("#engine-trigger-label"),
+  engineDialog: document.querySelector("#engine-dialog"),
+  engineList: document.querySelector("#engine-list"),
+  engineDialogStatus: document.querySelector("#engine-dialog-status"),
+  runtimeConnect: document.querySelector("#runtime-connect"),
+  runtimeInstallLink: document.querySelector("#runtime-install-link"),
+  runtimeCalloutCopy: document.querySelector("#runtime-callout-copy"),
   toolButtons: [...document.querySelectorAll("[data-command]")],
 });
 
@@ -55,6 +64,31 @@ let unsubscribe = null;
 let currentView = null;
 let initialized = false;
 let operating = false;
+let localAgentClient = null;
+let runtimeAdapters = [];
+let selectedEngine = "content-only";
+let connectingRuntime = false;
+
+const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
+const ADAPTER_STATE_LABELS = Object.freeze({
+  ready: "可用",
+  ready_unverified: "等待验证",
+  needs_configuration: "需要配置",
+  needs_login: "需要登录",
+  probe_only: "仅检测",
+  incompatible: "不兼容",
+  unavailable: "不可用",
+});
+const ADAPTER_REASON_LABELS = Object.freeze({
+  adapter_inspection_failed: "本机检测失败",
+  host_not_ready: "本机引擎尚未就绪",
+  host_adapter_not_runnable: "当前适配器不能运行",
+  required_capability_unsupported: "缺少结构化输出能力",
+  qwen_api_key_not_configured: "尚未配置 Qwen 服务凭据",
+  codebuddy_api_key_not_configured: "尚未配置 CodeBuddy 服务凭据",
+  codebuddy_model_not_configured: "尚未配置 CodeBuddy 模型",
+  claude_version_probe_failed: "Claude Code 版本检测失败",
+});
 
 function safeMessage(error, fallback = "私人老师暂时无法继续，请稍后重试。") {
   const message = typeof error?.message === "string" ? error.message.trim() : "";
@@ -71,6 +105,144 @@ function setToday() {
   elements.todayDate.setAttribute("aria-label", `今天是 ${formatter.format(new Date())}`);
 }
 
+function adapterById(engine) {
+  return runtimeAdapters.find((adapter) => adapter.id === engine) || null;
+}
+
+function engineDisplayName(engine = selectedEngine) {
+  if (engine === "content-only") return "基础私教";
+  return adapterById(engine)?.label || engine;
+}
+
+function agentChatAvailable() {
+  return Boolean(
+    localAgentClient?.connected &&
+    selectedEngine !== "content-only" &&
+    adapterById(selectedEngine)?.selectable === true,
+  );
+}
+
+function updateEngineUi(message = "") {
+  const display = engineDisplayName();
+  const agentActive = agentChatAvailable();
+  elements.engineTrigger.dataset.connected = agentActive ? "true" : "false";
+  elements.engineTriggerLabel.textContent = agentActive
+    ? `${display} · 本机 Agent`
+    : "基础私教 · 连接本机 Agent";
+  elements.engineDialogStatus.textContent = message || `当前：${display}${agentActive ? " · Agent 讲解已启用" : ""}`;
+  chat.setAgentChatAvailable(agentActive);
+  for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
+    button.setAttribute("aria-pressed", button.dataset.engine === selectedEngine ? "true" : "false");
+  }
+  if (initialized && currentView && !BUSY_STATES.has(currentView.state)) {
+    chat.setComposer({ enabled: true, answering: currentView.state === "awaiting_answer" });
+  }
+}
+
+function createEngineCard({ id, label, state, detail, reasons = [], selectable = false }) {
+  const button = document.createElement("button");
+  button.className = "engine-card";
+  button.type = "button";
+  button.dataset.engine = id;
+  button.dataset.engineState = state;
+  button.dataset.engineSelectable = id === "content-only" || selectable ? "true" : "false";
+  button.setAttribute("aria-pressed", id === selectedEngine ? "true" : "false");
+  button.disabled = operating || connectingRuntime || (id !== "content-only" && selectable !== true);
+
+  const title = document.createElement("span");
+  title.className = "engine-card__title";
+  title.textContent = label;
+  const status = document.createElement("span");
+  status.className = "engine-card__state";
+  status.textContent = id === "content-only" ? "始终可用" : (ADAPTER_STATE_LABELS[state] || state);
+  const copy = document.createElement("span");
+  copy.className = "engine-card__detail";
+  const reasonCopy = reasons.map((reason) => ADAPTER_REASON_LABELS[reason] || "需要在本机 Runtime 查看诊断");
+  copy.textContent = id === "content-only"
+    ? "固定题库、固定答案键、浏览器私人进度；不调用模型。"
+    : [detail, ...new Set(reasonCopy)].filter(Boolean).join(" · ").slice(0, 720) || "状态由本机 Runtime 报告。";
+  button.append(title, status, copy);
+  button.addEventListener("click", () => selectEngine(id));
+  return button;
+}
+
+function renderEngineList() {
+  const contentOnly = createEngineCard({
+    id: "content-only",
+    label: "基础私教",
+    state: "ready",
+    selectable: true,
+  });
+  const cards = runtimeAdapters.map((adapter) => createEngineCard(adapter));
+  elements.engineList.replaceChildren(contentOnly, ...cards);
+  updateEngineUi();
+}
+
+async function selectEngine(engine) {
+  if (operating || connectingRuntime) return;
+  if (engine !== "content-only") {
+    const adapter = adapterById(engine);
+    if (!localAgentClient?.connected || adapter?.selectable !== true) return;
+  }
+  selectedEngine = engine;
+  if (coachPromise) {
+    const coach = await coachPromise;
+    coach.setAgentPreference(engine);
+  }
+  updateEngineUi(`已选择：${engineDisplayName()}。学习档案、当前题目和进度均未改变。`);
+}
+
+async function connectRuntime() {
+  if (!LOOPBACK_RUNTIME_PAGE || connectingRuntime || operating) return;
+  connectingRuntime = true;
+  let completionMessage = "";
+  elements.runtimeConnect.disabled = true;
+  elements.engineTrigger.disabled = true;
+  elements.engineDialogStatus.textContent = "正在与本机 Runtime 建立仅存内存的授权……";
+  try {
+    const client = createLocalAgentClient({ origin: location.origin });
+    const connection = await client.connect();
+    localAgentClient?.disconnect();
+    localAgentClient = client;
+    runtimeAdapters = connection.adapters;
+    const coach = await getCoach();
+    coach.setAgentClient(client);
+    selectedEngine = "content-only";
+    coach.setAgentPreference(selectedEngine);
+    completionMessage = "本机 Runtime 已连接。请选择状态为“可用”的 Agent；基础私教仍可随时切回。";
+  } catch (error) {
+    localAgentClient?.disconnect();
+    localAgentClient = null;
+    runtimeAdapters = [];
+    selectedEngine = "content-only";
+    completionMessage = safeMessage(error, "本机 Runtime 连接失败；基础私教不受影响。");
+  } finally {
+    connectingRuntime = false;
+    elements.runtimeConnect.disabled = false;
+    elements.engineTrigger.disabled = operating;
+    renderEngineList();
+    updateEngineUi(completionMessage);
+  }
+}
+
+function setupEngineControls() {
+  if (LOOPBACK_RUNTIME_PAGE) {
+    elements.runtimeConnect.hidden = false;
+    elements.runtimeInstallLink.hidden = true;
+    elements.runtimeCalloutCopy.textContent = "当前页面由 127.0.0.1 本机 Runtime 提供。只有点击下方按钮后才会连接；授权令牌仅留在页面内存。";
+  } else {
+    elements.runtimeConnect.hidden = true;
+    elements.runtimeInstallLink.hidden = false;
+    elements.runtimeCalloutCopy.textContent = "当前是公开网页：不会扫描或连接 localhost。要用 Agent，请安装并从本机 Runtime 打开同一页面。";
+  }
+  elements.engineTrigger.addEventListener("click", () => {
+    if (typeof elements.engineDialog.showModal === "function") elements.engineDialog.showModal();
+    else elements.engineDialog.setAttribute("open", "");
+  });
+  elements.runtimeConnect.addEventListener("click", connectRuntime);
+  renderEngineList();
+}
+
 function updateFromView(view) {
   currentView = view;
   chat.renderState(view);
@@ -80,6 +252,8 @@ async function getCoach() {
   if (!coachPromise) {
     coachPromise = createWebCoachHarness()
       .then((coach) => {
+        if (localAgentClient?.connected) coach.setAgentClient(localAgentClient);
+        coach.setAgentPreference(selectedEngine);
         unsubscribe = coach.subscribe(updateFromView);
         return coach;
       })
@@ -94,6 +268,11 @@ async function getCoach() {
 function setOperating(value, message = "") {
   operating = value;
   for (const button of elements.toolButtons) button.disabled = value;
+  elements.engineTrigger.disabled = value || connectingRuntime;
+  for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
+    const unavailable = button.dataset.engine !== "content-only" && button.dataset.engineSelectable !== "true";
+    button.disabled = value || connectingRuntime || unavailable;
+  }
   if (value) {
     chat.setComposer({ enabled: initialized, busy: true });
     chat.setStatus(message || "正在处理……", "busy");
@@ -361,11 +540,25 @@ async function clearProfile() {
 }
 
 function showHelp() {
-  chat.appendCoach([
+  const lines = [
     "你可以像聊天一样输入：今天学什么、查看进度、继续、出题。",
     "答题时直接输入 A、AC 或 A,C；也可以输入“sure B”“确定 B”“unsure AC”，明确告诉我把握度。",
-    "本版没有接大模型，因此不会闲聊或编造解释，只执行这些确定性的学习指令。",
-  ]);
+    agentChatAvailable()
+      ? `当前已选择 ${engineDisplayName()}：完成客观题后会生成个性化讲解；不在答题状态时也可以直接提问。`
+      : "基础私教不调用模型，只执行确定性的学习指令；可从顶部选择本机 Agent。",
+  ];
+  chat.appendCoach(lines);
+}
+
+async function askAgent(raw) {
+  await operate(`正在请 ${engineDisplayName()} 结合你的弱项回答……`, async () => {
+    const coach = await getCoach();
+    const result = await coach.askAgent(raw);
+    chat.appendCoach([result.coaching_text], {
+      annotation: `讲解引擎 ${result.engine} · 本次对话不写入学习进度`,
+    });
+    return null;
+  });
 }
 
 async function handleCommand(command) {
@@ -405,6 +598,8 @@ async function handleChatInput(rawValue) {
     chat.appendCoach(["我还没有获得本浏览器档案的本地授权。请先点击“建档并开始诊断”。"]);
   } else if (currentView?.state === "awaiting_answer") {
     chat.appendCoach(["这是一道客观题，请输入 A–H；多选可输入 AC 或 A,C。要看可用指令，输入“帮助”。"]);
+  } else if (agentChatAvailable()) {
+    await askAgent(raw);
   } else {
     showHelp();
   }
@@ -480,6 +675,11 @@ elements.input.addEventListener("input", () => {
     if (answer) chat.setSelected(answer.response);
   }
 });
+elements.input.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  elements.answerForm.requestSubmit();
+});
 for (const button of elements.toolButtons) {
   button.addEventListener("click", () => handleCommand(button.dataset.command));
 }
@@ -490,10 +690,19 @@ elements.importFile.addEventListener("change", async () => {
 });
 
 setToday();
+setupEngineControls();
 chat.setComposer({ enabled: false });
-chat.setStatus("零安装 · 数据仅存当前浏览器", "ready");
+chat.setStatus(
+  LOOPBACK_RUNTIME_PAGE
+    ? "本机 Runtime 页面 · 尚未连接 Agent · 学习数据仍仅存浏览器"
+    : "零安装基础私教 · 数据仅存当前浏览器",
+  "ready",
+);
 
-if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+if (
+  "serviceWorker" in navigator &&
+  (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))
+) {
   navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {
     chat.setStatus("页面可正常使用；离线缓存暂未启用。", "ready");
   });
