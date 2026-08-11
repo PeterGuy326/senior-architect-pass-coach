@@ -170,7 +170,14 @@ async function fixture(options = {}) {
   await writeFile(path.join(directory, "pair.html"), "<!doctype html><title>Pair Coach</title>", "utf8");
   await writeFile(path.join(directory, "src", "pair.mjs"), "export const pair = true;", "utf8");
   await writeFile(path.join(directory, "src", "local-agent-client.mjs"), "export const client = true;", "utf8");
-  const calls = { inspections: [], preflights: 0, runnerRegistries: [], runs: [] };
+  const calls = {
+    inspections: [],
+    preflights: 0,
+    runnerRegistries: [],
+    runs: [],
+    codexPreflights: 0,
+    codexRuns: [],
+  };
   const inspectAdapter = options.inspectAdapter || (async ({ engine, directory: packageDirectory, hostRegistry }) => {
     calls.inspections.push({ engine, packageDirectory, hostRegistry });
     return readyInspection();
@@ -185,11 +192,35 @@ async function fixture(options = {}) {
       },
     };
   });
+  const codexPersonalProbe = options.codexPersonalProbe || (async () => ({
+    mode: "codex-personal-experimental",
+    engine: "codex",
+    status: "ready",
+    available: true,
+    selectable: true,
+    version: "0.146.0",
+    authentication: "existing_local_codex_login",
+    adapter_status: "experimental_personal",
+    qualified_adapter: false,
+    reason_codes: ["digital_employee_adapter_unqualified", "personal_saved_login_reused"],
+  }));
+  const codexPersonalRunnerFactory = options.codexPersonalRunnerFactory || (({ personalAuthConsent }) => ({
+    async preflight() {
+      assert.equal(personalAuthConsent, true);
+      calls.codexPreflights += 1;
+    },
+    async run(input) {
+      calls.codexRuns.push(input);
+      return completedSubmitOutput("Codex personal coaching.");
+    },
+  }));
   const runtime = createLocalAgentRuntime({
     docsRoot: directory,
     port: 0,
     inspectAdapter,
     runnerFactory,
+    codexPersonalProbe,
+    codexPersonalRunnerFactory,
     tokenFactory: () => TOKEN,
     ...(options.hostRegistry ? { hostRegistry: options.hostRegistry } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
@@ -501,18 +532,9 @@ test("CORS preflight allows only the exact Pages origin, route method, headers a
   }
 });
 
-test("adapter discovery is package-aware and never selects Codex probe-only or Qoder without structured output", async (t) => {
+test("adapter discovery distinguishes Codex personal consent from qualified framework adapters", async (t) => {
   const environment = await fixture({
     inspectAdapter: async ({ engine }) => {
-      if (engine === "codex") {
-        return readyInspection({
-          host: { adapterStatus: "probe_only", status: "installed" },
-          compatibility: {
-            compatible: false,
-            issues: [{ code: "host_adapter_not_runnable", message: "/private/path", blocking: true }],
-          },
-        });
-      }
       if (engine === "qoder") {
         return readyInspection({
           compatibility: {
@@ -541,8 +563,15 @@ test("adapter discovery is package-aware and never selects Codex probe-only or Q
   assert.equal(response.status, 200);
   assert.equal(response.body.adapters.length, 6);
   const byId = Object.fromEntries(response.body.adapters.map((adapter) => [adapter.id, adapter]));
-  assert.equal(byId.codex.state, "probe_only");
+  assert.equal(byId.codex.state, "consent_required");
   assert.equal(byId.codex.selectable, false);
+  assert.equal(byId.codex.execution_mode, "personal_experimental");
+  assert.equal(byId.codex.framework_adapter_status, "probe_only");
+  assert.equal(byId.codex.adapter_status, "experimental_personal");
+  assert.deepEqual(byId.codex.reason_codes, [
+    "codex_personal_mode_unqualified",
+    "codex_personal_consent_required",
+  ]);
   assert.equal(byId.qoder.state, "incompatible");
   assert.equal(byId.qoder.selectable, false);
   assert.equal(byId["qwen-code"].state, "ready");
@@ -560,6 +589,93 @@ test("adapter discovery is package-aware and never selects Codex probe-only or Q
     body: "{}",
   }));
   assert.equal(preflight.body.adapter.selectable, false);
+});
+
+test("Codex personal consent is bearer-bound, in-memory, and required before a run", async (t) => {
+  const environment = await fixture();
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  const before = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  assert.equal(before.body.adapters.find(({ id }) => id === "codex").state, "consent_required");
+
+  const rejected = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-before-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "codex" })),
+  }));
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.body.reason_code, "adapter_not_selectable");
+  assert.equal(environment.calls.codexRuns.length, 0);
+
+  const consented = await json(await fetch(`${environment.runtime.origin}/v1/adapters/codex/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-consent",
+    },
+    body: JSON.stringify({ consent_version: "codex-personal-consent.v1", accepted: true }),
+  }));
+  assert.equal(consented.status, 200);
+  assert.equal(consented.body.adapter.state, "experimental_personal");
+  assert.equal(consented.body.adapter.selectable, true);
+
+  const coaching = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-after-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "codex" })),
+  }));
+  assert.equal(coaching.status, 200);
+  assert.equal(coaching.body.coaching_text, "Codex personal coaching.");
+  assert.equal(coaching.body.execution_mode, "personal_experimental");
+  assert.equal(coaching.body.framework_adapter_status, "probe_only");
+  assert.equal(environment.calls.codexPreflights, 1);
+  assert.equal(environment.calls.codexRuns.length, 1);
+});
+
+test("Codex personal coaching cannot restate or contradict the trusted answer", async (t) => {
+  const environment = await fixture({
+    codexPersonalRunnerFactory: () => ({
+      async preflight() {},
+      async run() {
+        return completedSubmitOutput("A 才符合该故障模式。");
+      },
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+  await json(await fetch(`${environment.runtime.origin}/v1/adapters/codex/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-answer-consent",
+    },
+    body: JSON.stringify({ consent_version: "codex-personal-consent.v1", accepted: true }),
+  }));
+  const response = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-answer-assertion",
+    },
+    body: JSON.stringify(submitBody({ engine: "codex" })),
+  }));
+  assert.equal(response.status, 502);
+  assert.equal(response.body.reason_code, "agent_output_rejected");
+  assert.doesNotMatch(JSON.stringify(response.body), /故障模式|A/u);
 });
 
 test("compatibility inspection and execution receive the same operator-owned host registry", async (t) => {

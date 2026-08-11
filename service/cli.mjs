@@ -41,7 +41,8 @@ const USAGE = `系统架构设计师过线私教（本地 Workbench）
   --json               输出 JSON
 
 content-only 无需模型凭证；agent-host 使用 Digital Employee one-shot Host。
-Codex 在 Digital Employee 0.3.0 中仅 probe，会在运行前被拒绝。
+Codex 在 Digital Employee 0.3.0 中仅 probe，会被 CLI agent-host 拒绝；
+网页 Local Runtime 的 Codex 个人实验模式是独立、显式同意的案例级路径。
 `;
 
 function parse(argv) {

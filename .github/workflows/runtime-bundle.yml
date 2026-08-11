@@ -54,6 +54,9 @@ jobs:
             *) echo "Tag $GITHUB_REF_NAME does not match package version $version" >&2; exit 1 ;;
           esac
           test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$(git rev-parse HEAD)"
+          git fetch --no-tags origin \
+            +refs/heads/codex/feat-learning-harness:refs/remotes/origin/codex/feat-learning-harness
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/codex/feat-learning-harness)"
 
       - name: Install locked production dependencies
         run: npm ci --omit=dev
@@ -61,8 +64,11 @@ jobs:
       - name: Verify bundle architecture
         run: test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
 
-      - name: Verify the runtime and bundled Web client source
-        run: npm test
+      - name: Verify the runtime, Web client and employee package
+        run: npm run check
+
+      - name: Audit locked production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Build self-contained runtime folder
         run: >-
@@ -126,7 +132,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "架构过线私教 Local Agent Runtime $GITHUB_REF_NAME" \
-            --notes "无需 clone、npm install 或编译：下载对应系统压缩包，解压后直接打开；Runtime 只启动 127.0.0.1 配对桥并打开正式 GitHub Pages，考生在同一公开页面点击“连接本机 Agent”，确认后即可选择通过检查的引擎，原学习档案无需迁移。可用同页 SHA256SUMS 核对文件完整性。Linux 资产要求 x64 + glibc 2.28+，不适用于 Alpine/musl。当前 macOS 包为未 notarize 的开源预览版，ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书；若 Finder 右键“打开”仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”。Agent CLI 与模型凭证不会打包，只有 Digital Employee 对本机 Host、服务凭证和员工包能力检查都通过的引擎才可选择。" \
+            --notes "无需 clone、npm install 或编译：下载对应系统压缩包，解压后直接打开；Runtime 只启动 127.0.0.1 配对桥并打开正式 GitHub Pages，考生在同一公开页面点击“连接本机 Agent”，确认后即可选择通过检查的引擎，原学习档案无需迁移。可用同页 SHA256SUMS 核对文件完整性。Linux 资产要求 x64 + glibc 2.28+，不适用于 Alpine/musl。当前 macOS 包为未 notarize 的开源预览版，ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书；若 Finder 右键“打开”仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”。Agent CLI 与模型凭证不会打包。Claude、Qwen、CodeBuddy 只有 Digital Employee 对本机 Host、服务凭证和员工包能力检查都通过时才可选择；Codex 另提供明确标注的个人实验模式，当前仅开放已审计的 Codex CLI 0.146.0，要求本机已有 ChatGPT / Codex 登录并在当前内存授权中再次同意，框架状态仍为 probe-only。" \
             --generate-notes \
             --draft
           gh release edit "$GITHUB_REF_NAME" \

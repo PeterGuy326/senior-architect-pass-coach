@@ -102,7 +102,7 @@ const STATIC_AGENT_CATALOG = Object.freeze([
     label: "Codex CLI",
     state: "probe_only",
     selectable: false,
-    detail: "Digital Employee 0.3.0 目前只能探测安装，尚无合格的运行 Adapter。",
+    detail: "Digital Employee 0.3.0 仍仅探测；连接后可明确同意使用本机个人实验模式。",
   }),
   Object.freeze({
     id: "qwen-code",
@@ -132,6 +132,8 @@ const ADAPTER_STATE_LABELS = Object.freeze({
   package_incompatible: "本私教不兼容",
   ready: "可用",
   ready_unverified: "等待验证",
+  consent_required: "需要本人同意",
+  experimental_personal: "个人实验可用",
   needs_configuration: "需要配置",
   needs_login: "需要登录",
   probe_only: "仅检测",
@@ -147,6 +149,15 @@ const ADAPTER_REASON_LABELS = Object.freeze({
   codebuddy_api_key_not_configured: "尚未配置 CodeBuddy 服务凭据",
   codebuddy_model_not_configured: "尚未配置 CodeBuddy 模型",
   claude_version_probe_failed: "Claude Code 版本检测失败",
+  codex_personal_consent_required: "需明确同意复用本机 ChatGPT / Codex 登录",
+  codex_personal_mode_unqualified: "个人实验模式尚未通过 Digital Employee 工具白名单认证",
+  codex_login_required: "请先在本机 Codex CLI 登录 ChatGPT",
+  codex_executable_not_found: "本机未发现 Codex CLI",
+  codex_version_probe_failed: "Codex CLI 版本检测失败",
+  codex_version_not_audited: "当前只开放已审计的 Codex CLI 0.146.0",
+  codex_auth_file_missing: "未找到可供本机个人模式复用的 Codex 登录",
+  codex_auth_file_unsafe: "Codex 登录文件类型或权限不符合安全要求",
+  codex_command_surface_unsupported: "Codex CLI 命令面与已审计版本不一致",
   hermes_adapter_not_implemented: "Digital Employee 尚无合格的 Hermes 运行适配器",
   hermes_executable_not_found: "本机未发现 Hermes Agent",
   hermes_version_probe_failed: "Hermes Agent 版本检测失败",
@@ -214,9 +225,11 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
   button.type = "button";
   button.dataset.engine = id;
   button.dataset.engineState = state;
+  const actionable = id === "content-only" || selectable || state === "consent_required";
   button.dataset.engineSelectable = id === "content-only" || selectable ? "true" : "false";
+  button.dataset.engineActionable = actionable ? "true" : "false";
   button.setAttribute("aria-pressed", id === selectedEngine ? "true" : "false");
-  button.disabled = operating || connectingRuntime || (id !== "content-only" && selectable !== true);
+  button.disabled = operating || connectingRuntime || !actionable;
 
   const title = document.createElement("span");
   title.className = "engine-card__title";
@@ -253,8 +266,41 @@ function renderEngineList() {
 async function selectEngine(engine) {
   if (operating || connectingRuntime) return;
   if (engine !== "content-only") {
-    const adapter = adapterById(engine);
-    if (!localAgentClient?.connected || adapter?.selectable !== true) return;
+    let adapter = adapterById(engine);
+    if (!localAgentClient?.connected) return;
+    if (engine === "codex" && adapter?.state === "consent_required") {
+      const accepted = window.confirm(
+        "启用 Codex CLI 个人实验模式？\n\n"
+        + "它会复用你本机已登录的 ChatGPT / Codex 账号。提交后只向 Codex 发送科目、考点、掌握结果和去身份化进度，"
+        + "不发送题干、选项、你的作答、参考答案、解析或登录文件内容；Codex 只能选择一个补救计划，由本地模板显示。"
+        + "无题面复习时，你主动输入的追问会由 Codex 发往 OpenAI。学习进度仍由浏览器 Harness 决定。"
+        + "此模式尚未通过 Digital Employee 工具白名单认证，授权仅在当前 Runtime 内存中有效。",
+      );
+      if (!accepted) {
+        updateEngineUi("已取消 Codex 个人实验模式；基础私教和学习档案没有变化。");
+        return;
+      }
+      connectingRuntime = true;
+      renderEngineList();
+      updateEngineUi("正在为当前内存授权启用 Codex 个人实验模式……");
+      let consentError = "";
+      try {
+        const refreshed = await localAgentClient.consentCodexPersonal();
+        runtimeAdapters = runtimeAdapters.map((item) => item.id === "codex" ? refreshed : item);
+        adapter = refreshed;
+      } catch (error) {
+        adapter = null;
+        consentError = safeMessage(error, "Codex 个人实验模式未能启用；学习档案没有变化。");
+      } finally {
+        connectingRuntime = false;
+        renderEngineList();
+      }
+      if (consentError) {
+        updateEngineUi(consentError);
+        return;
+      }
+    }
+    if (adapter?.selectable !== true) return;
   }
   selectedEngine = engine;
   if (coachPromise) {
@@ -380,7 +426,7 @@ function setOperating(value, message = "") {
   for (const button of elements.toolButtons) button.disabled = value;
   elements.engineTrigger.disabled = value || connectingRuntime;
   for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
-    const unavailable = button.dataset.engine !== "content-only" && button.dataset.engineSelectable !== "true";
+    const unavailable = button.dataset.engineActionable !== "true";
     button.disabled = value || connectingRuntime || unavailable;
   }
   if (value) {

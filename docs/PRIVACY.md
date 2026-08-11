@@ -16,6 +16,10 @@ Runtime API 只监听 `127.0.0.1`。Pages 加载时不会扫描本机端口；�
 
 明文 Bearer 在浏览器侧只短暂经过确认页的 JavaScript 对象，之后只留在 Pages 的 JavaScript 私有字段；Runtime 只保留其摘要与绑定 Origin。它不进入 URL、DOM、IndexedDB、`localStorage`、`sessionStorage`、导出档案或日志，刷新页面或 Runtime 重启后失效。网页不能读取或提交模型 API Key，首个预览版只从 Runtime 启动环境读取 Adapter 所需服务凭证。Runtime 不持久化模型回复或建立第二份学习档案。
 
+选择 Codex 时还需要一次单独、明确的个人模式同意；该同意只绑定当前 Bearer 的 Runtime 内存。Runtime 不读取、复制、记录或上传本机 `auth.json` 内容，而是在 owner-only 临时目录创建短生命周期链接，让 Codex CLI 自己复用已有 ChatGPT / Codex 登录；每轮结束后删除临时目录。教学内容通过 stdin 交给一次性 ephemeral 进程，不进入命令行参数。提交后，Codex 模型服务只接收科目、考点、掌握结果和去身份化进度，不接收题干、选项、用户作答、参考答案或解析；模型只能选择枚举化补救计划，由本地模板显示。无题面复习时，用户主动输入的追问会交给 Codex。上述资料按用户自己的 OpenAI 账号与服务条款处理。
+
+Codex 个人模式不是 Digital Employee 的合格 Adapter。当前 stock Codex 不能提供完整模型工具目录证明，因此 Runtime 只把它作为显式实验能力：关闭模型工具网络与写入权限，禁用已知工具特性，并在观察到任何工具事件、提交轮自由文本、未知事件、异常输出或不合格 Schema 时拒绝整轮讲解。这个防御不能改写框架的 `probe_only` 结论；固定判分和已提交进度不受该轮成败影响。
+
 GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的 IndexedDB。确认页不读取、复制或保存学习档案；所有题目、作答和进度继续保存在原 Pages Origin，因此 Agent 配对不需要档案导出、导入或合并。导出仍只用于用户主动备份或换浏览器。
 
 桌面 Chrome/Edge 是当前 Agent 配对主路径。Safari、Firefox、受管浏览器或移动端如果阻止公开 HTTPS 页面访问本机 HTTP loopback，会保留 `content-only`，不改写已有状态。移动设备的 `127.0.0.1` 指向设备自身，Runtime 也不会监听 LAN 地址来绕过浏览器和网络边界。

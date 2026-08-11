@@ -26,7 +26,9 @@ Runtime 只绑定 `127.0.0.1`。受支持的产品路径把它用作确认页和
 
 该流程避免页面加载即扫描本机服务，也不把授权写进 URL、DOM、浏览器存储、导出或日志。Runtime 重启或 Pages 刷新后必须重新配对。桌面 Chrome/Edge 是当前主路径；Safari、Firefox、受管浏览器和移动端不满足 loopback 访问条件时降级到 `content-only`，Runtime 不监听 LAN 地址绕过浏览器边界。
 
-Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状态，不能把“安装了 CLI”冒充成“可以运行”。Claude Code、Qwen Code 和 CodeBuddy 只有在员工包级检查通过时才可选；Qoder 因缺少 `structured_output` 不可选；Codex 在 Digital Employee `0.3.0` 中是 probe-only；Hermes Agent 指 Nous Research 的 Hermes Agent，当前也仅以 `hermes --version` 探测，执行 Adapter 尚未实现。
+Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状态，不能把“安装了 CLI”冒充成“可以运行”。Claude Code、Qwen Code 和 CodeBuddy 只有在员工包级检查通过时才可选；Qoder 因缺少 `structured_output` 不可选；Codex 在 Digital Employee `0.3.0` 中仍是 probe-only；Hermes Agent 指 Nous Research 的 Hermes Agent，当前也仅以 `hermes --version` 探测，执行 Adapter 尚未实现。
+
+为了让本案例现在可以验证 Codex 体验，Runtime 另有一个不注册进 Digital Employee Host Registry 的 `codex-personal-experimental` 分支。它只有在本机版本与登录探测成功、且当前 Bearer 得到二次明确同意后才可选。提交轮的模型输入不含题干、选项、作答、参考答案或解析，只含科目、考点、掌握结果和去身份化进度；一次性 `codex exec` 也只能返回枚举化 `{coaching_plan}`，再由本地模板生成 summary。无题面复习轮才允许 `{coaching_text}`。判分、反馈与 proposal-only 事件始终由本地受信输入构造，并经过员工包 Schema、动作门和可信事实一致性校验。它持续对外报告 `framework_adapter_status: probe_only`，未来框架具备合格 Codex Adapter 后可直接删去这条案例级分支。
 
 Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 
@@ -34,7 +36,7 @@ Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 2. 出题不调用模型，提交前不向 Agent 请求答案；
 3. 提交后先在一个 IndexedDB 事务中保存可信判分和进度；
 4. 再把当前公开题面、可信判定与去标识化学习摘要发给 Runtime；
-5. Runtime 通过 Digital Employee 的 one-shot Host 执行员工包，完整验证输出后只返回有界的 `teaching_result.summary`；
+5. Runtime 通常通过 Digital Employee 的 one-shot Host 执行员工包；Codex 个人实验模式会在 Runtime 内再次缩减为科目、考点、掌握结果和去身份化进度，只接收枚举化 plan，再由受信本地模板组装同一输出契约；两条路径都完整验证后只返回有界 summary；
 6. 模型失败只会缺少本轮生成式讲解，不会回滚、重复或改写已经提交的进度。
 
 Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Pages Harness。切换 Claude、Qwen、CodeBuddy 或退回 `content-only` 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。自然语言追问同样只读取有界上下文，不具有进度写权限。
@@ -122,7 +124,7 @@ Harness 与 Workbench 在调用员工包前生成两份对象：
 - Safari、Firefox 或移动端到电脑 Runtime 的兼容桥；不支持时保留 `content-only`；
 - 已签名、notarized 与自动更新的正式桌面安装器（当前 Release 是无需编译的预览包）；
 - 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
-- Codex 可运行 Adapter（当前仅 probe-only）；
+- Digital Employee 合格 Codex Adapter（当前框架仅 probe-only；案例级个人实验 Runner 不等同于该能力）；
 - Hermes Agent（Nous Research）可运行 Adapter（当前仅探测可执行文件）。
 
 这些能力未来若实现，必须保留相同的默认拒绝和数据最小化边界。

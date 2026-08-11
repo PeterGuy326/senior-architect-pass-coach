@@ -12,6 +12,8 @@ const MAX_CHAT_CHARS = 2_000;
 const ADAPTER_STATES = new Set([
   "ready_unverified",
   "ready",
+  "consent_required",
+  "experimental_personal",
   "needs_configuration",
   "needs_login",
   "probe_only",
@@ -173,7 +175,7 @@ function safeAdapter(raw) {
     ? rawReasons.slice(0, 8).map((reason) => cleanText(reason, 128)).filter((reason) => /^[a-z0-9_]{1,128}$/u.test(reason))
     : [];
   const selectable = raw.selectable === true;
-  if (selectable && state !== "ready") {
+  if (selectable && !new Set(["ready", "experimental_personal"]).has(state)) {
     throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了矛盾的引擎可用状态。");
   }
   return Object.freeze({
@@ -183,6 +185,8 @@ function safeAdapter(raw) {
     detail: "",
     reasons: Object.freeze(reasons),
     selectable,
+    execution_mode: cleanText(raw.execution_mode, 64),
+    framework_adapter_status: cleanText(raw.framework_adapter_status, 64),
   });
 }
 
@@ -371,6 +375,22 @@ export class LocalAgentClient {
       throw clientError("INVALID_ADAPTER_RESPONSE", "本机 Runtime 的引擎清单无效。");
     }
     return Object.freeze(result.adapters.map(safeAdapter));
+  }
+
+  async consentCodexPersonal() {
+    this.#assertConnected();
+    const result = await this.#request("/v1/adapters/codex/personal-consent", {
+      method: "POST",
+      body: {
+        consent_version: "codex-personal-consent.v1",
+        accepted: true,
+      },
+      authenticated: true,
+    });
+    if (result.protocol !== LOOPBACK_PROTOCOL) {
+      throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
+    }
+    return safeAdapter(result.adapter);
   }
 
   async coach({ phase, engine, message = "", publicQuestion = null, trustedGrade = null, deidentifiedProgress } = {}) {

@@ -19,7 +19,7 @@
 1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. Runtime 只在 `127.0.0.1:43127` 启动配对桥，并打开上面的公开 Pages；如果浏览器没有自动打开，也可手动回到同一个链接。
 3. 在 Pages 点击“连接本机 Agent”。浏览器会打开一个由本机 Runtime 提供的确认窗口；确认后回到原页面，并按浏览器提示允许访问本机网络。
-4. 从 Runtime 实际检查通过的引擎中选择一个。可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
+4. 从 Runtime 实际检查通过的引擎中选择一个。选择 Codex 时还会出现一次明确的个人模式授权；可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
 
 这是“下载应用并打开”，不是 clone 仓库、安装 npm 依赖或本地编译。当前预览包尚未做 Apple notarization；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。macOS 首次打开可先在 Finder 中右键选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。Pages 在加载时不会扫描本机端口；只有点击连接后才访问固定的 loopback 地址并请求浏览器许可。
 
@@ -35,10 +35,10 @@ Digital Employee 当前的真实兼容边界如下：
 | Qwen Code | 可运行 Adapter | 需要 `0.17.1`、`OPENAI_API_KEY` 与 `OPENAI_MODEL` |
 | CodeBuddy | 可运行 Adapter | 需要 `2.106.4`、`CODEBUDDY_API_KEY` 与 `CODEBUDDY_MODEL` |
 | Qoder | 不兼容 | 当前 Adapter 不支持本员工包要求的结构化输出 |
-| Codex | 仅探测 | Digital Employee `0.3.0` 尚无可运行 Adapter |
+| Codex | 本机个人实验模式 | Digital Employee `0.3.0` 仍是 probe-only；当前仅开放已审计的 Codex CLI `0.146.0`，Runtime 检测到该版本与本机登录后，经本人再次同意，可用一次性 `codex exec` 补充讲解 |
 | Hermes Agent（Nous Research） | 仅探测 | 当前只检查 `hermes --version`；执行 Adapter 尚未实现，不能选择 |
 
-页面不会要求、接收或保存模型 API Key。首个预览版由 Runtime 启动时的本机环境提供对应服务凭证；框架 Adapter 不会冒充复用个人 CLI 登录态。已安装也不等于可用，页面只允许选择员工包级 preflight 通过的引擎。
+页面不会要求、接收或保存模型 API Key。Claude、Qwen 与 CodeBuddy 由 Runtime 启动时的本机环境提供对应服务凭证；合格框架 Adapter 不会冒充复用个人 CLI 登录态。Codex 是单独标注的案例级个人实验路径：只在用户明确同意后复用本机已有的 Codex / ChatGPT 登录，授权仅绑定当前 Runtime 内存，不会把它冒充成 Digital Employee 合格 Adapter。
 
 本项目把两类公开能力组合起来：
 
@@ -69,7 +69,7 @@ Digital Employee 当前的真实兼容边界如下：
 - 用 owner-only 会话文件保存题面与恢复点，不保存原始作答和受信授权；
 - 严格验证智能体的进度提议，并只用本地可信作答证据写入确定性进度引擎。
 
-旧的单轮 `run` 入口仍然关闭；连续对话统一走 `session` Harness。Digital Employee `0.3.0` 中 Codex 仍是 **probe-only**：可以探测兼容性，但 `agent-host` 会在模型运行前拒绝它。
+旧的单轮 `run` 入口仍然关闭；连续对话统一走 `session` Harness。Digital Employee `0.3.0` 中 Codex 仍是 **probe-only**，所以 CLI 的 `agent-host` 会在模型运行前拒绝它。网页 Runtime 另提供明确标注的 **Codex CLI 个人实验模式**：提交后不把题干、选项、作答、参考答案或解析交给 Codex，只发送科目、考点、掌握结果和去身份化进度；模型只能返回枚举化 `coaching_plan`，再由本地模板生成补救建议。无题面复习追问仍可返回有界 `coaching_text`。判分、反馈字段和进度提案全部由本地可信输入构造；任何工具事件、提交轮自由文本、未知事件、Schema 错误或异常终态都会拒绝整轮讲解。
 
 ## 开发者与连接器本地运行
 
@@ -146,7 +146,7 @@ npm run coach -- session start \
 
 CLI Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，并重新注入当前题目和批准材料。当前零安装网页使用同一套教学规则的浏览器 `content-only` Adapter；未来 IM 连接器可以复用机器轮次契约。
 
-Local Agent Runtime 采用 Hybrid Harness：出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Runtime 的产品职责是 loopback 配对与执行，不拥有第二份网页档案。
+Local Agent Runtime 采用 Hybrid Harness：出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选合格 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Codex 个人实验模式遵守同一提交顺序，但采用更窄的资料投影：只把科目、考点、掌握结果和去身份化进度交给模型，模型仅选择枚举化补救计划，本地模板再渲染建议；题干、选项、作答、参考答案和解析都不会进入 Codex Prompt。它使用临时隔离目录、ephemeral `codex exec`、结构化输出，以及关闭模型工具网络与写入的 Permission Profile；Codex 自身的 OpenAI 控制面连接仍用于生成回复。它仍因 stock Codex 无法证明完整模型工具目录而不属于合格框架 Adapter。Runtime 的产品职责是 loopback 配对与执行，不拥有第二份网页档案。
 
 用户首先看到的是员工自己的名称、欢迎语和发布者声明；Digital Employee 作为基础设施归属，Qwen/Claude/CodeBuddy 等仅作为可替换 engine 出现在运行信息中。当前品牌 sidecar 是本项目的先行约定，通用 package presentation 已反馈到上游 [Issue #102](https://github.com/fullstack-ai-infra/digital-employee/issues/102)。
 
@@ -164,7 +164,7 @@ Workbench 会拒绝把私人数据目录设在代码仓库内，即使该目录�
 npm run coach -- validate-package
 npm run coach -- eval-package
 
-# 只探测 Codex 本机兼容性；不会调用模型
+# 框架层仍只探测 Codex；不会调用个人实验路径
 npm run coach -- validate-package --engine codex
 ```
 
@@ -180,8 +180,10 @@ flowchart LR
   B --> E["去标识化弱项 + 提交后可信判定"]
   A -. "显式确认 + 内存授权" .-> F["127.0.0.1 Local Agent Runtime"]
   E --> F
-  F --> G["Digital Employee 0.3.0"]
+  F --> G["Digital Employee 0.3.0 合格 Adapter"]
+  F --> M["Codex 个人实验 Runner · 明确同意"]
   G --> H["用户选择的 Claude / Qwen / CodeBuddy"]
+  M --> I
   H --> I["有界 coaching text"]
   I --> B
   K["CLI / 未来 IM Adapter"] --> L["Node Conversation Harness"]

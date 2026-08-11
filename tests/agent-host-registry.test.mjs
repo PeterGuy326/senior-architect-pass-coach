@@ -35,6 +35,9 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.doesNotMatch(catalogSource, /state:\s*"ready"|等待连接本机|本机已安装/u);
   assert.match(source, /基础私教 · Runtime 已连接/u);
   assert.match(source, /下方是本次对安装、凭据和员工契约的真实检测结果/u);
+  assert.match(source, /Codex CLI 个人实验模式/u);
+  assert.match(source, /consentCodexPersonal/u);
+  assert.match(source, /个人实验模式尚未通过 Digital Employee 工具白名单认证/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /input\.addEventListener\("click"/u);
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");

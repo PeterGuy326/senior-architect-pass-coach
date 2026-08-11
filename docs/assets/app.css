@@ -1089,6 +1089,10 @@ textarea[disabled] {
   opacity: 1;
 }
 
+.engine-card[data-engine-actionable="true"]:not([disabled]) {
+  cursor: pointer;
+}
+
 .engine-card:hover:not([disabled]) {
   background: var(--white);
   border-color: #9c8962;
@@ -1115,9 +1119,14 @@ textarea[disabled] {
 
 .engine-card[data-engine-state="needs_configuration"] .engine-card__state,
 .engine-card[data-engine-state="needs_login"] .engine-card__state,
+.engine-card[data-engine-state="consent_required"] .engine-card__state,
 .engine-card[data-engine-state="framework_supported"] .engine-card__state,
 .engine-card[data-engine-state="ready_unverified"] .engine-card__state {
   color: #8b651f;
+}
+
+.engine-card[data-engine-state="experimental_personal"] .engine-card__state {
+  color: var(--jade);
 }
 
 .engine-card[data-engine-state="probe_only"] .engine-card__state,

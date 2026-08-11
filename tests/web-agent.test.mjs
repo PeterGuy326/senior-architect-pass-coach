@@ -330,6 +330,64 @@ test("Runtime bearer stays inside client memory and is absent from URLs, bodies,
   ]);
 });
 
+test("Codex personal consent is explicit, memory-only, and returns an experimental selectable state", async () => {
+  const token = "c".repeat(43);
+  const calls = [];
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "codex-personal-consent-request",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "codex-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) {
+        return jsonResponse({
+          protocol: LOOPBACK_PROTOCOL,
+          adapters: [{
+            id: "codex",
+            label: "Codex CLI",
+            state: "consent_required",
+            selectable: false,
+            reason_codes: ["codex_personal_consent_required"],
+            execution_mode: "personal_experimental",
+            framework_adapter_status: "probe_only",
+          }],
+        });
+      }
+      return jsonResponse({
+        protocol: LOOPBACK_PROTOCOL,
+        adapter: {
+          id: "codex",
+          label: "Codex CLI",
+          state: "experimental_personal",
+          selectable: true,
+          reason_codes: ["codex_personal_mode_unqualified"],
+          execution_mode: "personal_experimental",
+          framework_adapter_status: "probe_only",
+        },
+      });
+    },
+  });
+  const connected = await client.connect();
+  assert.equal(connected.adapters[0].state, "consent_required");
+  assert.equal(connected.adapters[0].selectable, false);
+
+  const adapter = await client.consentCodexPersonal();
+  assert.equal(adapter.state, "experimental_personal");
+  assert.equal(adapter.selectable, true);
+  assert.equal(adapter.execution_mode, "personal_experimental");
+  assert.equal(adapter.framework_adapter_status, "probe_only");
+  const consentBody = JSON.parse(calls[2].options.body);
+  assert.deepEqual(consentBody, {
+    consent_version: "codex-personal-consent.v1",
+    accepted: true,
+  });
+  assert.equal(calls[2].options.headers.Authorization, `Bearer ${token}`);
+  assert.equal(calls[2].url.includes(token), false);
+  assert.equal(String(calls[2].options.body).includes(token), false);
+});
+
 test("Runtime failures expose only a stable reason code and local message, never server text", async () => {
   let call = 0;
   const client = createLocalAgentClient({

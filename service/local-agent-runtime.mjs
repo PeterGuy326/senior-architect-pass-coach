@@ -9,6 +9,11 @@ import { inspectEmployeeHostCompatibility } from "@fullstack-ai-infra/digital-em
 
 import { DigitalEmployeeHostRunner } from "./host-runner.mjs";
 import {
+  assertCodexCoachingText,
+  CodexPersonalRunner,
+  probeCodexPersonalMode,
+} from "./codex-personal-runner.mjs";
+import {
   COACH_ENGINE_CATALOG,
   createCoachAgentHostRegistry,
 } from "./agent-host-registry.mjs";
@@ -517,19 +522,58 @@ function publicAdapter(entry, inspection) {
   };
 }
 
+function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
+  const rawReasons = Array.isArray(probe?.reason_codes) ? probe.reason_codes : [];
+  const reasonMap = Object.freeze({
+    codex_not_found: "codex_executable_not_found",
+    digital_employee_adapter_unqualified: "codex_personal_mode_unqualified",
+    personal_saved_login_reused: "codex_personal_mode_unqualified",
+  });
+  const reasons = [...new Set([
+    "codex_personal_mode_unqualified",
+    ...rawReasons.map((reason) => reasonMap[reason] || reason),
+    ...(probe?.status === "ready" && !consented ? ["codex_personal_consent_required"] : []),
+  ])].filter((reason) => SAFE_REASON_CODE.test(reason)).slice(0, 16);
+  const ready = probe?.status === "ready" && probe?.available === true;
+  const state = ready
+    ? (consented ? "experimental_personal" : "consent_required")
+    : probe?.status === "needs_login"
+      ? "needs_login"
+      : probe?.status === "incompatible"
+        ? "incompatible"
+      : "unavailable";
+  return {
+    id: entry.id,
+    label: entry.label,
+    state,
+    selectable: ready && consented,
+    host_status: ready
+      ? "ready"
+      : probe?.status === "needs_login"
+        ? "not_ready"
+        : probe?.status === "incompatible"
+          ? "installed"
+          : "not_found",
+    adapter_status: "experimental_personal",
+    execution_mode: "personal_experimental",
+    framework_adapter_status: "probe_only",
+    reason_codes: reasons,
+  };
+}
+
 function hashToken(token) {
   return createHash("sha256").update(token, "utf8").digest();
 }
 
-function tokenMatches(token, grants, origin, now) {
-  if (!TOKEN_PATTERN.test(token)) return false;
+function matchingGrant(token, grants, origin, now) {
+  if (!TOKEN_PATTERN.test(token)) return null;
   const candidate = hashToken(token);
-  return grants.some((grant) => (
+  return grants.find((grant) => (
     grant.origin === origin
     && grant.expiresAt > now
     && grant.hash.length === candidate.length
     && timingSafeEqual(grant.hash, candidate)
-  ));
+  )) || null;
 }
 
 function safeErrorResult(error) {
@@ -696,6 +740,13 @@ export class LocalAgentRuntime {
       engine,
       hostRegistry: registry,
     }),
+    codexPersonalProbe = probeCodexPersonalMode,
+    codexPersonalRunnerFactory = ({ personalAuthConsent }) => new CodexPersonalRunner({
+      personalAuthConsent,
+      ...(process.env.SENIOR_ARCHITECT_CODEX_MODEL
+        ? { model: process.env.SENIOR_ARCHITECT_CODEX_MODEL }
+        : {}),
+    }),
     tokenFactory = () => randomBytes(32).toString("base64url"),
     serverFactory = createServer,
     employeeDirectory = employeePackageDirectory,
@@ -722,6 +773,10 @@ export class LocalAgentRuntime {
     }
     if (!Array.isArray(engineCatalog) || engineCatalog.length < 1) {
       throw new TypeError("engineCatalog_required");
+    }
+    if (typeof codexPersonalProbe !== "function") throw new TypeError("codexPersonalProbe_required");
+    if (typeof codexPersonalRunnerFactory !== "function") {
+      throw new TypeError("codexPersonalRunnerFactory_required");
     }
     const normalizedCatalog = engineCatalog.map((entry) => {
       if (
@@ -764,6 +819,8 @@ export class LocalAgentRuntime {
     this.engineCatalog = Object.freeze(normalizedCatalog);
     this.engineIds = new Set(normalizedCatalog.map(({ id }) => id));
     this.runnerFactory = runnerFactory;
+    this.codexPersonalProbe = codexPersonalProbe;
+    this.codexPersonalRunnerFactory = codexPersonalRunnerFactory;
     this.tokenFactory = tokenFactory;
     this.serverFactory = serverFactory;
     this.employeeDirectory = employeeDirectory;
@@ -844,9 +901,20 @@ export class LocalAgentRuntime {
     this.origin = null;
   }
 
-  async inspect(engine) {
+  async inspect(engine, { grant } = {}) {
     const entry = this.engineCatalog.find((candidate) => candidate.id === engine);
     if (!entry) throw requestError("ADAPTER_NOT_FOUND");
+    if (engine === "codex") {
+      let probe;
+      try {
+        probe = await this.codexPersonalProbe();
+      } catch {
+        probe = { status: "unavailable", available: false, reason_codes: ["codex_version_probe_failed"] };
+      }
+      return publicCodexPersonalAdapter(entry, probe, {
+        consented: grant?.codexPersonalConsent === true,
+      });
+    }
     let inspection;
     try {
       inspection = await this.inspectAdapter({
@@ -902,6 +970,7 @@ export class LocalAgentRuntime {
         hash: hashToken(token),
         origin: grantOrigin,
         expiresAt: this.clock() + this.grantLifetimeMs,
+        codexPersonalConsent: false,
       });
       if (this.bearerGrants.length > MAX_BEARER_HASHES) this.bearerGrants.shift();
       sendJson(response, 200, {
@@ -914,30 +983,46 @@ export class LocalAgentRuntime {
     }
     if (pathname === "/v1/adapters") {
       if (request.method !== "GET") throw requestError("METHOD_NOT_ALLOWED");
-      this.#assertProtected(request);
-      const adapters = await Promise.all(this.engineCatalog.map(({ id }) => this.inspect(id)));
+      const grant = this.#assertProtected(request);
+      const adapters = await Promise.all(this.engineCatalog.map(({ id }) => this.inspect(id, { grant })));
       sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapters });
+      return;
+    }
+    if (pathname === "/v1/adapters/codex/personal-consent") {
+      if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
+      const grant = this.#assertProtected(request);
+      const { value } = await readJson(request, this.maxBodyBytes);
+      exactObject(value, ["consent_version", "accepted"]);
+      if (
+        value.consent_version !== "codex-personal-consent.v1"
+        || value.accepted !== true
+      ) {
+        throw requestError("INVALID_REQUEST");
+      }
+      grant.codexPersonalConsent = true;
+      const adapter = await this.inspect("codex", { grant });
+      sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapter });
       return;
     }
     const preflight = /^\/v1\/adapters\/([A-Za-z0-9-]+)\/preflight$/u.exec(pathname);
     if (preflight) {
       if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
-      this.#assertProtected(request);
+      const grant = this.#assertProtected(request);
       const { value } = await readJson(request, this.maxBodyBytes, { allowEmpty: true });
       exactObject(value, [], []);
-      const adapter = await this.inspect(preflight[1]);
+      const adapter = await this.inspect(preflight[1], { grant });
       sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapter });
       return;
     }
     if (pathname === "/v1/coach") {
       if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
-      this.#assertProtected(request);
+      const grant = this.#assertProtected(request);
       const idempotencyKey = request.headers["idempotency-key"];
       if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
         throw requestError("INVALID_IDEMPOTENCY_KEY");
       }
       const { body, value } = await readJson(request, this.maxBodyBytes);
-      await this.#handleCoach(response, idempotencyKey, body, value);
+      await this.#handleCoach(response, idempotencyKey, body, value, grant);
       return;
     }
     if (pathname.startsWith("/v1/")) throw requestError("NOT_FOUND");
@@ -1010,7 +1095,11 @@ export class LocalAgentRuntime {
     const requestedMethod = request.headers["access-control-request-method"];
     const routeMethod = pathname === "/v1/adapters"
       ? "GET"
-      : (/^\/v1\/adapters\/[A-Za-z0-9-]+\/preflight$/u.test(pathname) || pathname === "/v1/coach")
+      : (
+          /^\/v1\/adapters\/[A-Za-z0-9-]+\/preflight$/u.test(pathname)
+          || pathname === "/v1/adapters/codex/personal-consent"
+          || pathname === "/v1/coach"
+        )
         ? "POST"
         : null;
     if (requestedMethod !== routeMethod) throw requestError("METHOD_NOT_ALLOWED");
@@ -1063,9 +1152,11 @@ export class LocalAgentRuntime {
     }
     const token = authorization.slice("Bearer ".length);
     this.#purgeExpiredGrants();
-    if (!tokenMatches(token, this.bearerGrants, origin, this.clock())) {
+    const grant = matchingGrant(token, this.bearerGrants, origin, this.clock());
+    if (!grant) {
       throw requestError("AUTH_REQUIRED");
     }
+    return grant;
   }
 
   #purgeExpiredGrants() {
@@ -1073,9 +1164,10 @@ export class LocalAgentRuntime {
     this.bearerGrants = this.bearerGrants.filter((grant) => grant.expiresAt > now);
   }
 
-  async #handleCoach(response, idempotencyKey, rawBody, value) {
+  async #handleCoach(response, idempotencyKey, rawBody, value, grant) {
     const digest = createHash("sha256").update(rawBody).digest("hex");
-    const existing = this.idempotency.get(idempotencyKey);
+    const receiptKey = `${grant.hash.toString("hex")}:${idempotencyKey}`;
+    const existing = this.idempotency.get(receiptKey);
     if (existing) {
       if (existing.digest !== digest) throw requestError("IDEMPOTENCY_CONFLICT");
       const replay = await existing.result;
@@ -1085,11 +1177,11 @@ export class LocalAgentRuntime {
     if (this.runBusy) throw requestError("AGENT_BUSY");
     const normalized = normalizeCoachRequest(value, this.engineIds);
     this.runBusy = true;
-    const result = this.#runCoach(normalized)
+    const result = this.#runCoach(normalized, { grant })
       .then((body) => ({ statusCode: 200, body }))
       .catch((error) => safeErrorResult(error))
       .finally(() => { this.runBusy = false; });
-    this.idempotency.set(idempotencyKey, { digest, result });
+    this.idempotency.set(receiptKey, { digest, result });
     this.#trimIdempotency();
     const completed = await result;
     sendJson(response, completed.statusCode, completed.body);
@@ -1102,13 +1194,15 @@ export class LocalAgentRuntime {
     }
   }
 
-  async #runCoach(request) {
+  async #runCoach(request, { grant } = {}) {
     const { action, input } = await buildEmployeeInput(request);
-    const adapter = await this.inspect(request.engine);
+    const adapter = await this.inspect(request.engine, { grant });
     if (!adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
     let output;
     try {
-      const runner = this.runnerFactory({ engine: request.engine, hostRegistry: this.hostRegistry });
+      const runner = request.engine === "codex"
+        ? this.codexPersonalRunnerFactory({ personalAuthConsent: grant?.codexPersonalConsent === true })
+        : this.runnerFactory({ engine: request.engine, hostRegistry: this.hostRegistry });
       if (!runner || typeof runner.preflight !== "function" || typeof runner.run !== "function") {
         throw new Error("invalid_runner");
       }
@@ -1127,6 +1221,7 @@ export class LocalAgentRuntime {
       if (request.trustedGrade) validateSubmissionFacts(output, request);
       else validateQuestionFacts(output, request);
       const summary = sanitizeCoachingText(output.teaching_result.summary);
+      if (request.engine === "codex") assertCodexCoachingText(summary);
       if (
         containsSensitiveText(summary)
         || (request.publicQuestion && !request.trustedGrade && HIDDEN_ANSWER_HINT.test(summary))
@@ -1141,6 +1236,8 @@ export class LocalAgentRuntime {
         coaching_text: summary,
         answer_visibility: request.trustedGrade ? "revealed_after_submission" : "hidden",
         progress_write: "not_performed",
+        execution_mode: request.engine === "codex" ? "personal_experimental" : "qualified_adapter",
+        framework_adapter_status: request.engine === "codex" ? "probe_only" : "runnable",
       };
     } catch (error) {
       if (error instanceof RuntimeRequestError) throw error;
