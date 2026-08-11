@@ -21,6 +21,10 @@ import {
   planDailyTasks,
   progressSummary,
 } from "./progress-rules.mjs";
+import {
+  assessResponseBehavior,
+  calibrateResponseConfidence,
+} from "./response-behavior.mjs";
 
 export const WEB_HARNESS_STATES = Object.freeze({
   READY: "ready",
@@ -165,6 +169,7 @@ function normalizeSubmission(value, options) {
   return {
     response: Array.isArray(response) ? response.map((item) => item.trim()) : response.trim(),
     confidence,
+    behavior: settings.behavior ?? null,
     expectedRevision: settings.expectedRevision,
     expectedItemId: settings.expectedItemId,
   };
@@ -249,6 +254,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.state = WEB_HARNESS_STATES.READY;
     this.message = "尚未读取本浏览器的学习进度。";
     this.lastError = null;
@@ -297,6 +303,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
@@ -330,6 +337,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
@@ -381,6 +389,7 @@ export class BrowserCoachHarness {
     this.state = this.session.state;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     if (!tasks.length) {
       this.message = "当前没有可安全解析的综合知识任务。";
@@ -399,6 +408,11 @@ export class BrowserCoachHarness {
     if (expectedRevision !== this.session.revision || expectedItemId !== this.question.item_id) {
       throw coachError("STALE_VIEW", "页面题目或版本已经过期，请刷新后继续。");
     }
+    const calibration = calibrateResponseConfidence({
+      question: this.question,
+      observation: submission.behavior,
+      declaredConfidence: submission.confidence,
+    });
     this.state = WEB_HARNESS_STATES.EVALUATING;
     this.message = "正在使用固定答案键判定；如已连接 Agent，讲解会在进度提交后生成。";
     this.#emit();
@@ -406,10 +420,16 @@ export class BrowserCoachHarness {
       const result = await this.#workerRequest("grade", {
         contentRef: clone(this.session.active_item_ref.content_ref),
         response: submission.response,
-        confidence: submission.confidence,
+        confidence: calibration.effective_confidence,
       });
       const task = this.session.tasks[this.session.cursor];
-      const grade = validateGrade(result, task, this.question, submission.confidence);
+      const grade = validateGrade(result, task, this.question, calibration.effective_confidence);
+      const behavior = assessResponseBehavior({
+        question: this.question,
+        observation: submission.behavior,
+        declaredConfidence: submission.confidence,
+        correct: grade.correct,
+      });
       const now = nowFrom(this.clock);
       const attempt = {
         attempt_id: `objective:${this.session.session_id}:${this.session.cursor + 1}:${this.question.item_id}`,
@@ -419,7 +439,15 @@ export class BrowserCoachHarness {
         skill: "recognition",
         score: grade.correct ? 1 : 0,
         max_score: 1,
-        confidence: submission.confidence,
+        confidence: behavior.effective_confidence,
+        declared_confidence: behavior.declared_confidence,
+        confidence_source: behavior.confidence_source,
+        behavior_signal: behavior.signal,
+        timing_source: behavior.timing_source,
+        timing_quality: behavior.timing_quality,
+        duration_seconds: behavior.duration_seconds,
+        first_choice_seconds: behavior.first_choice_seconds,
+        answer_changes: behavior.answer_changes,
         result: grade.result,
         at: now,
         source_ref: Array.isArray(grade.source_refs) ? grade.source_refs[0] : "public-review-repository",
@@ -435,15 +463,32 @@ export class BrowserCoachHarness {
           result: grade.result,
           correct: grade.correct,
           source_refs: Array.isArray(grade.source_refs) ? grade.source_refs : [],
+          behavior: {
+            schema_version: behavior.schema_version,
+            signal: behavior.signal,
+            timing_source: behavior.timing_source,
+            timing_quality: behavior.timing_quality,
+            declared_confidence: behavior.declared_confidence,
+            confidence_source: behavior.confidence_source,
+            effective_confidence: behavior.effective_confidence,
+            duration_seconds: behavior.duration_seconds,
+            first_choice_seconds: behavior.first_choice_seconds,
+            answer_changes: behavior.answer_changes,
+            summary: behavior.summary,
+          },
         },
       });
       this.progress = committed.progress;
       this.session = committed.session;
       this.feedback = grade;
+      this.responseBehavior = behavior;
       this.state = WEB_HARNESS_STATES.FEEDBACK;
       this.lastError = null;
+      const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(behavior.signal);
       this.message = grade.result === "mastered"
-        ? "这题答对且把握明确，记为 mastered。"
+        ? (behaviorRisk
+          ? "这题答对且自报确定；行为信号仍建议复测，本次不计入稳定掌握证据。"
+          : "这题答对且把握明确，记为 mastered；答题用时只作为辅助行为证据。")
         : (grade.result === "needs_retest"
           ? "答案正确但把握不足，记为 needs_retest，稍后再测。"
           : "这题尚未掌握，已进入优先复习队列。");
@@ -498,6 +543,7 @@ export class BrowserCoachHarness {
     this.session = await this.store.putSession(next, { expectedRevision: this.session.revision });
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.state = this.session.state;
     if (complete) {
@@ -565,7 +611,7 @@ export class BrowserCoachHarness {
         ? this.question
         : null,
       feedback: this.state === WEB_HARNESS_STATES.FEEDBACK && this.feedback
-        ? { grade: this.feedback }
+        ? { grade: this.feedback, behavior: this.responseBehavior }
         : null,
       tasks: this.session?.tasks || [],
       completedTasks: this.session?.cursor || 0,
@@ -598,6 +644,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
@@ -612,6 +659,7 @@ export class BrowserCoachHarness {
     this.session = null;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.state = WEB_HARNESS_STATES.READY;
     this.lastError = null;
@@ -657,6 +705,13 @@ export class BrowserCoachHarness {
       .map((task) => {
         const topic = this.progress?.topics?.[task.topic_id];
         const mastery = Number(topic?.mastery?.recognition?.mastery);
+        const latestBehavior = topic?.mastery?.recognition?.latest_behavior_signal;
+        const behaviorReason = {
+          fluent: "answer_fluent",
+          hesitant: "answer_hesitant",
+          likely_guess: "answer_likely_guess",
+          overconfident_wrong: "answer_overconfident_wrong",
+        }[latestBehavior] || null;
         const reviewDue = task.review_due === true || task.action === "review" || task.action === "retest";
         return {
           topic_id: safeAgentText(task.topic_id, 128),
@@ -666,7 +721,7 @@ export class BrowserCoachHarness {
           mastery: Number.isFinite(mastery) ? mastery : null,
           review_due: reviewDue,
           estimated_minutes: Number.isFinite(Number(task.minutes)) ? Number(task.minutes) : null,
-          reason_code: task.action === "diagnose" ? "cold_start" : (reviewDue ? "review_due" : "pass_priority"),
+          reason_code: behaviorReason || (task.action === "diagnose" ? "cold_start" : (reviewDue ? "review_due" : "pass_priority")),
         };
       })
       .filter((item) => item.topic_id);
@@ -703,6 +758,7 @@ export class BrowserCoachHarness {
     this.session = session;
     this.question = null;
     this.feedback = null;
+    this.responseBehavior = null;
     this.#clearAgentTurn();
     this.lastError = null;
     const task = session.tasks[session.cursor];
@@ -815,6 +871,7 @@ export class BrowserCoachHarness {
       this.session = await this.store.putSession(awaiting, { expectedRevision: this.session.revision });
       this.question = question;
       this.feedback = null;
+      this.responseBehavior = null;
       this.#clearAgentTurn();
       this.state = WEB_HARNESS_STATES.AWAITING_ANSWER;
       this.lastError = null;

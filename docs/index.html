@@ -145,14 +145,18 @@
 
           <form class="answer-composer" id="answer-form" aria-label="提交答案">
             <fieldset class="confidence-switch" id="confidence-field" disabled>
-              <legend>这题有把握吗？</legend>
+              <legend>自报把握度</legend>
               <label>
                 <input type="radio" name="confidence" value="unsure" checked>
-                <span>不确定 / 猜的</span>
+                <span>不确定</span>
               </label>
               <label>
                 <input type="radio" name="confidence" value="sure">
                 <span>确定</span>
+              </label>
+              <label>
+                <input type="radio" name="confidence" value="guess">
+                <span>我在猜</span>
               </label>
             </fieldset>
             <div class="answer-row">
@@ -171,7 +175,7 @@
               ></textarea>
               <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
             </div>
-            <p class="answer-hint" id="answer-hint">选答案前不会显示正确项和解析。</p>
+            <p class="answer-hint" id="answer-hint">选答案前不会显示正确项和解析。私教会结合前台有效用时、首次选择和改选次数辅助判断；快答不会把“不确定”自动升级为掌握。</p>
             <p class="form-error" id="answer-error" role="alert"></p>
           </form>
         </section>
@@ -244,7 +248,7 @@
         >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
         <button class="secondary-action" id="runtime-connect" type="button">连接本机 Agent</button>
       </div>
-      <div class="engine-list" id="engine-list" aria-label="可选讲解引擎">
+      <div class="engine-list" id="engine-list" aria-label="讲解引擎状态与选择">
         <button class="engine-card" type="button" data-engine="content-only" data-engine-state="ready" aria-pressed="true">
           <span class="engine-card__title">基础私教</span>
           <span class="engine-card__state">始终可用</span>

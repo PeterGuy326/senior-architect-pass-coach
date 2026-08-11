@@ -418,6 +418,15 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
   const feedback = await coach.answer({
     response: "B",
     confidence: "sure",
+    behavior: {
+      schema_version: "web-response-observation.v1",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 15,
+      first_choice_seconds: 9,
+      answer_changes: 0,
+      confidence_source: "explicit",
+    },
     expectedRevision: question.revision,
     expectedItemId: question.question.item_id,
   });
@@ -431,6 +440,10 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
   assert.equal(serialized.includes("private/path"), false);
   assert.equal(agentPayload.deidentifiedProgress.schema_version, "deidentified-progress.v1");
   assert.equal(agentPayload.trustedGrade.reference_answer, "B");
+  assert.equal(agentPayload.deidentifiedProgress.recommendations[0].reason_code, "answer_fluent");
+  for (const forbidden of ["duration_seconds", "first_choice_seconds", "answer_changes", "confidence_source"]) {
+    assert.equal(JSON.stringify(agentPayload).includes(forbidden), false, forbidden);
+  }
   assert.equal(JSON.stringify(await coach.exportData()).includes("只针对薄弱点再练一题"), false);
 });
 

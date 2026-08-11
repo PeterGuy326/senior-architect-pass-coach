@@ -29,6 +29,16 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
     .map((match) => match[1]);
   assert.deepEqual(webIds, COACH_ENGINE_CATALOG.map(({ id }) => id));
   assert.match(catalogSource, /Hermes Agent \(Nous Research\)/u);
+  assert.equal((catalogSource.match(/state:\s*"framework_supported"/gu) || []).length, 3);
+  assert.equal((catalogSource.match(/state:\s*"package_incompatible"/gu) || []).length, 1);
+  assert.equal((catalogSource.match(/state:\s*"probe_only"/gu) || []).length, 2);
+  assert.doesNotMatch(catalogSource, /state:\s*"ready"|等待连接本机|本机已安装/u);
+  assert.match(source, /基础私教 · Runtime 已连接/u);
+  assert.match(source, /下方是本次对安装、凭据和员工契约的真实检测结果/u);
+  assert.match(source, /syncInput:\s*false/u);
+  assert.match(source, /input\.addEventListener\("click"/u);
+  const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
+  assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

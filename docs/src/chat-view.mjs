@@ -115,9 +115,11 @@ function feedbackCopy(feedback) {
   const result = asText(grade.result ?? grade.status).toLowerCase();
   const correct = grade.correct === true || result === "correct" || result === "mastered";
   const needsRetest = result.includes("retest") || result.includes("guess");
+  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(feedback?.behavior?.signal);
 
   let verdict = "这题已经完成批注。";
   if (correct && needsRetest) verdict = "答案对了，但这次把握不足：先记为“需要复测”。";
+  else if (correct && behaviorRisk) verdict = "答案对了；但这次行为信号仍建议复测，暂不计为稳定掌握证据。";
   else if (correct) verdict = "答对了，而且证据足够：这部分可以暂记为已掌握。";
   else if (grade.correct === false || result.includes("wrong") || result.includes("not_mastered")) {
     verdict = "这题没有答对：先记入弱项，后面会安排复测。";
@@ -127,6 +129,7 @@ function feedbackCopy(feedback) {
     verdict,
     reference: asText(grade.reference_answer ?? grade.answer),
     explanation: asText(grade.explanation ?? grade.analysis ?? feedback?.message),
+    behavior: asText(feedback?.behavior?.summary),
   };
 }
 
@@ -235,12 +238,12 @@ export function createChatView({
     input.setAttribute("aria-label", answering ? "输入 A 到 H 的答案，可输入多个选项" : "输入学习指令");
   }
 
-  function setSelected(value) {
+  function setSelected(value, { syncInput = true } = {}) {
     selected = new Set(String(value || "").toUpperCase().match(/[A-H]/gu) || []);
     for (const button of optionPanel.querySelectorAll("button[data-option]")) {
       button.setAttribute("aria-pressed", selected.has(button.dataset.option) ? "true" : "false");
     }
-    input.value = [...selected].sort().join("");
+    if (syncInput) input.value = [...selected].sort().join("");
   }
 
   function setAgentChatAvailable(value) {
@@ -361,9 +364,10 @@ export function createChatView({
       optionPanel.hidden = true;
       const copy = feedbackCopy(view.feedback);
       const paragraphs = [copy.verdict];
+      if (copy.behavior) paragraphs.push(copy.behavior);
       if (copy.reference) paragraphs.push(`参考答案：${copy.reference}`);
       if (copy.explanation) paragraphs.push(copy.explanation);
-      appendCoach(paragraphs, { annotation: "确定答对才算掌握；不确定或猜对，仍会进入复测。" });
+      appendCoach(paragraphs, { annotation: "用时只是辅助信号；不会单凭快答升级掌握，刷新或切走页面后的残缺计时也不作推断。" });
       setComposer({ enabled: true });
     } else if (state === "complete") {
       optionPanel.hidden = true;

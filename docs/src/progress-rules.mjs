@@ -11,6 +11,16 @@ export const OBJECTIVE_RESULTS = Object.freeze({
 
 const SUBJECTS = Object.freeze(["comprehensive", "case", "essay"]);
 const CONFIDENCE = new Set(["guess", "unsure", "sure"]);
+const BEHAVIOR_SIGNALS = new Set([
+  "fluent",
+  "hesitant",
+  "likely_guess",
+  "overconfident_wrong",
+  "insufficient_signal",
+  "steady",
+]);
+const TIMING_SOURCES = new Set(["live", "restored", "unavailable"]);
+const TIMING_QUALITIES = new Set(["clean", "interrupted", "resumed", "unavailable"]);
 const ATTEMPT_KEYS = new Set([
   "attempt_id",
   "item_id",
@@ -20,6 +30,14 @@ const ATTEMPT_KEYS = new Set([
   "score",
   "max_score",
   "confidence",
+  "declared_confidence",
+  "confidence_source",
+  "behavior_signal",
+  "timing_source",
+  "timing_quality",
+  "duration_seconds",
+  "first_choice_seconds",
+  "answer_changes",
   "result",
   "at",
   "source_ref",
@@ -83,6 +101,8 @@ function blankRecognition() {
     attempt_count: 0,
     score_sum: 0,
     max_score_sum: 0,
+    stability_score_sum: 0,
+    stability_max_score_sum: 0,
     attempted_items: [],
     qualified_evidence: [],
     successful_dates: [],
@@ -180,6 +200,45 @@ function validateAttempt(attempt) {
   if (![0, 1].includes(attempt.score) || attempt.max_score !== 1 || !CONFIDENCE.has(attempt.confidence)) {
     fail("INVALID_ATTEMPT", "客观题分数或把握度无效。");
   }
+  const hasBehavior = Object.hasOwn(attempt, "behavior_signal");
+  if (hasBehavior) {
+    if (
+      !CONFIDENCE.has(attempt.declared_confidence) ||
+      !["default", "explicit"].includes(attempt.confidence_source) ||
+      !BEHAVIOR_SIGNALS.has(attempt.behavior_signal) ||
+      !TIMING_SOURCES.has(attempt.timing_source) ||
+      !TIMING_QUALITIES.has(attempt.timing_quality) ||
+      (attempt.timing_source === "live" && !["clean", "interrupted"].includes(attempt.timing_quality)) ||
+      (attempt.timing_source === "restored" && attempt.timing_quality !== "resumed") ||
+      (attempt.timing_source === "unavailable" && attempt.timing_quality !== "unavailable") ||
+      (attempt.declared_confidence !== "sure" && attempt.confidence !== attempt.declared_confidence) ||
+      (attempt.declared_confidence === "sure" && !["sure", "unsure"].includes(attempt.confidence)) ||
+      !(attempt.duration_seconds === null || (
+        Number.isFinite(attempt.duration_seconds) && attempt.duration_seconds >= 0 && attempt.duration_seconds <= 1_800
+      )) ||
+      !(attempt.first_choice_seconds === null || (
+        Number.isFinite(attempt.first_choice_seconds) && attempt.first_choice_seconds >= 0 && attempt.first_choice_seconds <= 1_800
+      )) ||
+      !Number.isSafeInteger(attempt.answer_changes) ||
+      attempt.answer_changes < 0 ||
+      attempt.answer_changes > 20 ||
+      (
+        attempt.duration_seconds !== null &&
+        attempt.first_choice_seconds !== null &&
+        attempt.first_choice_seconds > attempt.duration_seconds
+      )
+    ) fail("INVALID_ATTEMPT", "答题行为证据无效。");
+  } else if ([
+    "declared_confidence",
+    "confidence_source",
+    "timing_source",
+    "timing_quality",
+    "duration_seconds",
+    "first_choice_seconds",
+    "answer_changes",
+  ].some((key) => Object.hasOwn(attempt, key))) {
+    fail("INVALID_ATTEMPT", "答题行为证据不完整。");
+  }
   isoInstant(attempt.at);
   const expected = objectiveResult({ correct: attempt.score === 1, confidence: attempt.confidence });
   if (attempt.result !== expected) fail("GRADE_RESULT_MISMATCH", "三态结果与本地判定不一致。");
@@ -188,8 +247,8 @@ function validateAttempt(attempt) {
 
 function recognitionStatus(record) {
   if (record.regression_active) return "fragile";
-  const maximum = Number(record.max_score_sum || 0);
-  const accuracy = maximum > 0 ? Number(record.score_sum || 0) / maximum : 0;
+  const maximum = Number(record.stability_max_score_sum || 0);
+  const accuracy = maximum > 0 ? Number(record.stability_score_sum || 0) / maximum : 0;
   const uniqueItems = new Set(record.qualified_evidence.map((item) => item.item_id));
   const dates = new Set(record.qualified_evidence.map((item) => dayOf(item.at)));
   if (uniqueItems.size >= 6 && dates.size >= 2 && accuracy >= 0.8) return "pass_ready";
@@ -222,7 +281,14 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
   record.last_attempt_at = attempt.at;
   record.latest_ratio = attempt.score;
   record.latest_confidence = attempt.confidence;
-  record.latest_qualified = attempt.score === 1 && attempt.confidence !== "guess";
+  record.latest_behavior_signal = attempt.behavior_signal || null;
+  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(attempt.behavior_signal);
+  const stabilityEligible = attempt.confidence === "sure" && (!behaviorRisk || attempt.score === 0);
+  if (stabilityEligible) {
+    record.stability_score_sum = Number(record.stability_score_sum || 0) + attempt.score;
+    record.stability_max_score_sum = Number(record.stability_max_score_sum || 0) + attempt.max_score;
+  }
+  record.latest_qualified = attempt.score === 1 && attempt.confidence === "sure" && !behaviorRisk;
   if (wasPassReady && !record.latest_qualified) record.regression_active = true;
   if (record.latest_qualified) {
     record.qualified_evidence.push({
@@ -233,14 +299,18 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
     });
     record.successful_dates = [...new Set([...record.successful_dates, dayOf(attempt.at)])].sort();
   }
-  const lifetimeAccuracy = record.score_sum / record.max_score_sum;
-  record.mastery = Number((lifetimeAccuracy * Math.min(1, record.attempted_items.length / 6)).toFixed(4));
+  const stabilityAccuracy = record.stability_max_score_sum > 0
+    ? record.stability_score_sum / record.stability_max_score_sum
+    : 0;
+  const qualifiedItems = new Set(record.qualified_evidence.map((item) => item.item_id));
+  record.mastery = Number((stabilityAccuracy * Math.min(1, qualifiedItems.size / 6)).toFixed(4));
+  if (record.regression_active && record.latest_qualified) record.regression_active = false;
   record.status = recognitionStatus(record);
   if (record.status === "pass_ready") {
     record.ever_pass_ready = true;
     record.regression_active = false;
   }
-  const interval = record.regression_active || attempt.score < 1 || attempt.confidence === "guess"
+  const interval = record.regression_active || attempt.score < 1 || attempt.confidence === "guess" || behaviorRisk
     ? 1
     : (record.status === "pass_ready" ? 14 : 3);
   record.next_review_at = addDays(dayOf(attempt.at), interval);

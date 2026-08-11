@@ -1,4 +1,4 @@
-const CACHE_NAME = "architect-pass-coach-pages-v4";
+const CACHE_NAME = "architect-pass-coach-pages-v7";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
@@ -12,6 +12,7 @@ const CORE_ASSETS = Object.freeze([
   "./src/pair.mjs",
   "./src/indexeddb-store.mjs",
   "./src/progress-rules.mjs",
+  "./src/response-behavior.mjs",
   "./src/content-worker.mjs",
   "./src/github-content.mjs",
   "./src/objective-parser.mjs",

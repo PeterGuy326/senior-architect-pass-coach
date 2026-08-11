@@ -23,6 +23,10 @@ const PRIVATE_CONTENT_KEYS = new Set([
   "explanation",
   "analysis",
   "assessment_bundle",
+  "selection_trace",
+  "selection_hash",
+  "keystrokes",
+  "focus_history",
 ]);
 
 function clone(value) {
@@ -63,7 +67,9 @@ function transactionDone(transaction) {
 function sameAttempt(left, right) {
   const keys = [
     "attempt_id", "item_id", "topic_id", "subject", "skill", "score", "max_score",
-    "confidence", "result", "at", "source_ref", "content_revision",
+    "confidence", "declared_confidence", "confidence_source", "behavior_signal", "timing_source", "timing_quality",
+    "duration_seconds", "first_choice_seconds", "answer_changes",
+    "result", "at", "source_ref", "content_revision",
   ];
   return keys.every((key) => (left?.[key] ?? null) === (right?.[key] ?? null));
 }
@@ -102,6 +108,18 @@ function validateSession(session) {
   assertContentFree(session, "学习会话");
 }
 
+function orderedAttempts(rawAttempts) {
+  return clone(rawAttempts || []).sort((left, right) => String(left.at).localeCompare(String(right.at))
+    || String(left.attempt_id).localeCompare(String(right.attempt_id)));
+}
+
+function replayProgress(rawAttempts, createdAt) {
+  return orderedAttempts(rawAttempts).reduce(
+    (state, attempt) => applyObjectiveAttempt(state, attempt).progress,
+    createBlankProgress({ now: createdAt }),
+  );
+}
+
 function normalizeImport(payload) {
   if (!payload || payload.schema_version !== WEB_COACH_EXPORT_VERSION) {
     throw error("INVALID_IMPORT", "学习数据导出版本不受支持。");
@@ -111,12 +129,8 @@ function normalizeImport(payload) {
   if (!Array.isArray(payload.attempts) || !Array.isArray(payload.sessions)) {
     throw error("INVALID_IMPORT", "导入数据缺少 attempts 或 sessions。");
   }
-  const attempts = clone(payload.attempts).sort((left, right) => String(left.at).localeCompare(String(right.at))
-    || String(left.attempt_id).localeCompare(String(right.attempt_id)));
-  const replayed = attempts.reduce(
-    (state, attempt) => applyObjectiveAttempt(state, attempt).progress,
-    createBlankProgress({ now: payload.progress.created_at }),
-  );
+  const attempts = orderedAttempts(payload.attempts);
+  const replayed = replayProgress(attempts, payload.progress.created_at);
   if (replayed.applied_attempt_ids.length !== payload.attempts.length) {
     throw error("INVALID_IMPORT", "导入作答存在重复 attempt_id。");
   }
@@ -202,18 +216,22 @@ export class IndexedDbCoachStore {
     validateProfile(profile);
     validateProgress(progress);
     const database = await this.open();
-    const transaction = database.transaction([STORES.profiles, STORES.progress], "readwrite");
+    const transaction = database.transaction([STORES.profiles, STORES.progress, STORES.attempts], "readwrite");
     const done = transactionDone(transaction);
     const profileStore = transaction.objectStore(STORES.profiles);
     const progressStore = transaction.objectStore(STORES.progress);
     const existingProfile = await requestValue(profileStore.get("self"));
     const existingProgress = await requestValue(progressStore.get("current"));
+    const existingAttempts = await requestValue(transaction.objectStore(STORES.attempts).getAll());
+    const resolvedProgress = existingProgress
+      ? replayProgress(existingAttempts, existingProgress.created_at)
+      : progress;
     if (!existingProfile) profileStore.put(clone(profile));
-    if (!existingProgress) progressStore.put(clone(progress));
+    progressStore.put(clone(resolvedProgress));
     await done;
     const value = {
       profile: clone(existingProfile || profile),
-      progress: clone(existingProgress || progress),
+      progress: clone(resolvedProgress),
       created: !existingProfile,
     };
     if (value.created) this.publisher.publish({ type: "initialized" });
@@ -228,8 +246,12 @@ export class IndexedDbCoachStore {
 
   async getProgress() {
     const database = await this.open();
-    const transaction = database.transaction(STORES.progress, "readonly");
-    return clone(await requestValue(transaction.objectStore(STORES.progress).get("current")) || null);
+    const transaction = database.transaction([STORES.progress, STORES.attempts], "readonly");
+    const [progress, attempts] = await Promise.all([
+      requestValue(transaction.objectStore(STORES.progress).get("current")),
+      requestValue(transaction.objectStore(STORES.attempts).getAll()),
+    ]);
+    return progress ? replayProgress(attempts, progress.created_at) : null;
   }
 
   async getSession(sessionId) {
@@ -300,17 +322,20 @@ export class IndexedDbCoachStore {
     const attemptStore = transaction.objectStore(STORES.attempts);
     const progressStore = transaction.objectStore(STORES.progress);
     const sessionStore = transaction.objectStore(STORES.sessions);
-    const [existingAttempt, currentProgress, currentSession] = await Promise.all([
+    const [existingAttempt, currentProgress, currentSession, storedAttempts] = await Promise.all([
       requestValue(attemptStore.get(attempt.attempt_id)),
       requestValue(progressStore.get("current")),
       requestValue(sessionStore.get(sessionId)),
+      requestValue(attemptStore.getAll()),
     ]);
+    const replayedProgress = replayProgress(storedAttempts, currentProgress?.created_at || attempt.at);
     if (existingAttempt) {
       if (!sameAttempt(existingAttempt, attempt)) {
         return abortWith(transaction, done, error("ATTEMPT_CONFLICT", "相同 attempt_id 对应了不同判定。"));
       }
+      progressStore.put(clone(replayedProgress));
       await done;
-      return { attempt: clone(existingAttempt), progress: clone(currentProgress), session: clone(currentSession), replayed: true };
+      return { attempt: clone(existingAttempt), progress: clone(replayedProgress), session: clone(currentSession), replayed: true };
     }
     if (!currentSession || currentSession.revision !== expectedRevision) {
       return abortWith(transaction, done, error("REVISION_CONFLICT", "学习会话已在其他页面更新，请刷新后继续。"));
@@ -318,7 +343,7 @@ export class IndexedDbCoachStore {
     if (currentSession.active_item_ref?.item_id !== expectedItemId || attempt.item_id !== expectedItemId) {
       return abortWith(transaction, done, error("ACTIVE_ITEM_CONFLICT", "提交题目不是当前活动题目。"));
     }
-    const applied = applyObjectiveAttempt(currentProgress, attempt);
+    const applied = applyObjectiveAttempt(replayedProgress, attempt);
     const nextSession = {
       ...currentSession,
       state: "feedback",
@@ -349,11 +374,12 @@ export class IndexedDbCoachStore {
       requestValue(transaction.objectStore(STORES.attempts).getAll()),
       requestValue(transaction.objectStore(STORES.sessions).getAll()),
     ]);
+    const replayedProgress = progress ? replayProgress(attempts, progress.created_at) : null;
     const payload = {
       schema_version: WEB_COACH_EXPORT_VERSION,
       exported_at: now,
       profile: clone(profile),
-      progress: clone(progress),
+      progress: clone(replayedProgress),
       attempts: clone(attempts),
       sessions: clone(sessions),
     };
@@ -410,10 +436,16 @@ export class MemoryCoachStore {
     const created = !this.profile;
     this.profile ||= clone(profile);
     this.progress ||= clone(progress);
-    return { profile: clone(this.profile), progress: clone(this.progress), created };
+    const replayedProgress = replayProgress([...this.attempts.values()], this.progress.created_at);
+    this.progress = clone(replayedProgress);
+    return { profile: clone(this.profile), progress: clone(replayedProgress), created };
   }
   async getProfile() { return clone(this.profile); }
-  async getProgress() { return clone(this.progress); }
+  async getProgress() {
+    return this.progress
+      ? replayProgress([...this.attempts.values()], this.progress.created_at)
+      : null;
+  }
   async getSession(id) { return clone(this.sessions.get(id) || null); }
   async listSessions() {
     return [...this.sessions.values()]
@@ -450,16 +482,18 @@ export class MemoryCoachStore {
     assertContentFree(attempt, "作答证据");
     assertContentFree(feedback, "反馈摘要");
     const existingAttempt = this.attempts.get(attempt.attempt_id);
+    const replayedProgress = replayProgress([...this.attempts.values()], this.progress?.created_at || attempt.at);
     if (existingAttempt) {
       if (!sameAttempt(existingAttempt, attempt)) throw error("ATTEMPT_CONFLICT", "相同 attempt_id 对应了不同判定。");
-      return { attempt: clone(existingAttempt), progress: clone(this.progress), session: clone(this.sessions.get(sessionId)), replayed: true };
+      this.progress = clone(replayedProgress);
+      return { attempt: clone(existingAttempt), progress: clone(replayedProgress), session: clone(this.sessions.get(sessionId)), replayed: true };
     }
     const session = this.sessions.get(sessionId);
     if (!session || session.revision !== expectedRevision) throw error("REVISION_CONFLICT", "学习会话版本冲突。");
     if (session.active_item_ref?.item_id !== expectedItemId || attempt.item_id !== expectedItemId) {
       throw error("ACTIVE_ITEM_CONFLICT", "提交题目不是当前活动题目。");
     }
-    const applied = applyObjectiveAttempt(this.progress, attempt);
+    const applied = applyObjectiveAttempt(replayedProgress, attempt);
     const nextSession = { ...session, state: "feedback", revision: session.revision + 1, feedback: clone(feedback), updated_at: attempt.at };
     validateSession(nextSession);
     this.attempts.set(attempt.attempt_id, clone(attempt));
@@ -469,11 +503,14 @@ export class MemoryCoachStore {
     return { attempt: clone(attempt), progress: clone(this.progress), session: clone(nextSession), replayed: false };
   }
   async exportData({ now = new Date().toISOString() } = {}) {
+    const replayedProgress = this.progress
+      ? replayProgress([...this.attempts.values()], this.progress.created_at)
+      : null;
     const payload = {
       schema_version: WEB_COACH_EXPORT_VERSION,
       exported_at: now,
       profile: clone(this.profile),
-      progress: clone(this.progress),
+      progress: clone(replayedProgress),
       attempts: [...this.attempts.values()].map(clone),
       sessions: [...this.sessions.values()].map(clone),
     };

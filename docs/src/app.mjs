@@ -1,5 +1,6 @@
 import { createWebCoachHarness } from "./harness.mjs";
 import { createChatView } from "./chat-view.mjs";
+import { createResponseTimer } from "./response-behavior.mjs";
 import {
   createLocalAgentClient,
   DEFAULT_RUNTIME_ORIGIN,
@@ -45,6 +46,8 @@ const requiredElements = Object.entries(elements)
   .map(([key]) => key);
 if (requiredElements.length) throw new Error(`PAGE_CONTRACT_MISSING:${requiredElements.join(",")}`);
 
+const responseTimer = createResponseTimer();
+
 const chat = createChatView({
   timeline: elements.timeline,
   optionPanel: elements.optionPanel,
@@ -58,8 +61,9 @@ const chat = createChatView({
   subjectList: elements.subjectList,
   evidenceBadge: elements.evidenceBadge,
   statusLine: elements.statusLine,
-  onOption: () => {
+  onOption: (value) => {
     elements.answerError.textContent = "";
+    responseTimer.recordAnswer(value);
     elements.input.focus();
   },
 });
@@ -73,19 +77,59 @@ let localAgentClient = null;
 let runtimeAdapters = [];
 let selectedEngine = "content-only";
 let connectingRuntime = false;
+let restoringProfile = false;
+let confidenceTouched = false;
 
 const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
 const PUBLIC_COACH_PAGE = location.origin === PUBLIC_COACH_ORIGIN;
 const STATIC_AGENT_CATALOG = Object.freeze([
-  Object.freeze({ id: "claude-code", label: "Claude Code" }),
-  Object.freeze({ id: "qoder", label: "Qoder CLI" }),
-  Object.freeze({ id: "codex", label: "Codex CLI" }),
-  Object.freeze({ id: "qwen-code", label: "Qwen Code" }),
-  Object.freeze({ id: "codebuddy", label: "CodeBuddy Code" }),
-  Object.freeze({ id: "hermes", label: "Hermes Agent (Nous Research)" }),
+  Object.freeze({
+    id: "claude-code",
+    label: "Claude Code",
+    state: "framework_supported",
+    selectable: false,
+    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和员工契约。",
+  }),
+  Object.freeze({
+    id: "qoder",
+    label: "Qoder CLI",
+    state: "package_incompatible",
+    selectable: false,
+    detail: "本私教要求 structured_output；当前 Qoder Adapter 不满足，连接也不会冒充可用。",
+  }),
+  Object.freeze({
+    id: "codex",
+    label: "Codex CLI",
+    state: "probe_only",
+    selectable: false,
+    detail: "Digital Employee 0.3.0 目前只能探测安装，尚无合格的运行 Adapter。",
+  }),
+  Object.freeze({
+    id: "qwen-code",
+    label: "Qwen Code",
+    state: "framework_supported",
+    selectable: false,
+    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和模型配置。",
+  }),
+  Object.freeze({
+    id: "codebuddy",
+    label: "CodeBuddy Code",
+    state: "framework_supported",
+    selectable: false,
+    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和模型配置。",
+  }),
+  Object.freeze({
+    id: "hermes",
+    label: "Hermes Agent (Nous Research)",
+    state: "probe_only",
+    selectable: false,
+    detail: "可以探测本机安装，但尚无通过本私教契约的运行 Adapter。",
+  }),
 ]);
 const ADAPTER_STATE_LABELS = Object.freeze({
-  runtime_required: "等待连接本机",
+  runtime_required: "本机尚未检测",
+  framework_supported: "框架支持运行",
+  package_incompatible: "本私教不兼容",
   ready: "可用",
   ready_unverified: "等待验证",
   needs_configuration: "需要配置",
@@ -143,11 +187,18 @@ function agentChatAvailable() {
 function updateEngineUi(message = "") {
   const display = engineDisplayName();
   const agentActive = agentChatAvailable();
-  elements.engineTrigger.dataset.connected = agentActive ? "true" : "false";
+  const runtimeConnected = Boolean(localAgentClient?.connected);
+  elements.engineTrigger.dataset.connected = runtimeConnected ? "true" : "false";
   elements.engineTriggerLabel.textContent = agentActive
     ? `${display} · 本机 Agent`
-    : "基础私教 · 连接本机 Agent";
-  elements.engineDialogStatus.textContent = message || `当前：${display}${agentActive ? " · Agent 讲解已启用" : ""}`;
+    : runtimeConnected
+      ? "基础私教 · Runtime 已连接"
+      : "基础私教 · 连接本机 Agent";
+  elements.engineDialogStatus.textContent = message || (
+    localAgentClient?.connected
+      ? `当前：${display}${agentActive ? " · Agent 讲解已启用" : " · Runtime 已连接"}`
+      : "本机 Runtime 尚未连接；下列状态是框架能力，不代表本机已安装。"
+  );
   chat.setAgentChatAvailable(agentActive);
   for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
     button.setAttribute("aria-pressed", button.dataset.engine === selectedEngine ? "true" : "false");
@@ -191,14 +242,9 @@ function renderEngineList() {
     state: "ready",
     selectable: true,
   });
-  const visibleAdapters = runtimeAdapters.length
+  const visibleAdapters = localAgentClient?.connected
     ? runtimeAdapters
-    : STATIC_AGENT_CATALOG.map((adapter) => ({
-        ...adapter,
-        state: "runtime_required",
-        selectable: false,
-        detail: "连接本机 Runtime 后才会检测安装、凭据和契约兼容性。",
-      }));
+    : STATIC_AGENT_CATALOG;
   const cards = visibleAdapters.map((adapter) => createEngineCard(adapter));
   elements.engineList.replaceChildren(contentOnly, ...cards);
   updateEngineUi();
@@ -250,12 +296,19 @@ async function connectRuntime() {
     connectingRuntime = false;
     elements.runtimeConnect.disabled = false;
     elements.engineTrigger.disabled = operating;
+    updateRuntimeCallout();
     renderEngineList();
     updateEngineUi(completionMessage);
   }
 }
 
-function setupEngineControls() {
+function updateRuntimeCallout() {
+  if (localAgentClient?.connected) {
+    elements.runtimeCalloutCopy.textContent = "本机 Runtime 已连接；下方是本次对安装、凭据和员工契约的真实检测结果。";
+    elements.runtimeConnect.textContent = "重新检测本机 Agent";
+    return;
+  }
+  elements.runtimeConnect.textContent = "连接本机 Agent";
   if (LOOPBACK_RUNTIME_PAGE) {
     elements.runtimeConnect.hidden = false;
     elements.runtimeInstallLink.hidden = true;
@@ -263,23 +316,46 @@ function setupEngineControls() {
   } else if (PUBLIC_COACH_PAGE) {
     elements.runtimeConnect.hidden = false;
     elements.runtimeInstallLink.hidden = false;
-    elements.runtimeCalloutCopy.textContent = "这是公开网页。只有你点击后，才会打开 127.0.0.1 的本机确认窗口；页面加载时不会扫描端口。";
+    elements.runtimeCalloutCopy.textContent = "这是公开网页。下方先展示框架能力，不代表本机已安装；只有你点击后，才会打开 127.0.0.1 确认并检测，页面加载时不会扫描端口。";
   } else {
     elements.runtimeConnect.hidden = true;
     elements.runtimeInstallLink.hidden = false;
     elements.runtimeCalloutCopy.textContent = "这个预览来源不能连接本机 Runtime。请使用正式 GitHub Pages 页面。";
   }
+}
+
+function setupEngineControls() {
+  updateRuntimeCallout();
   elements.engineTrigger.addEventListener("click", () => {
+    responseTimer.setVisible(false);
     if (typeof elements.engineDialog.showModal === "function") elements.engineDialog.showModal();
     else elements.engineDialog.setAttribute("open", "");
   });
+  elements.engineDialog.addEventListener("close", () => {
+    responseTimer.setVisible(document.visibilityState !== "hidden" && document.hasFocus());
+  });
+  elements.engineDialog.addEventListener("cancel", () => responseTimer.setVisible(false));
   elements.runtimeConnect.addEventListener("click", connectRuntime);
   renderEngineList();
+}
+
+function syncResponseTimer(view) {
+  if (view?.state === "awaiting_answer" && view.question?.item_id && Number.isSafeInteger(view.revision)) {
+    responseTimer.start({
+      itemId: view.question.item_id,
+      revision: view.revision,
+      restored: restoringProfile,
+      visible: document.visibilityState !== "hidden" && document.hasFocus(),
+    });
+    return;
+  }
+  responseTimer.clear();
 }
 
 function updateFromView(view) {
   currentView = view;
   chat.renderState(view);
+  syncResponseTimer(view);
 }
 
 async function getCoach() {
@@ -346,8 +422,11 @@ async function operate(message, action) {
   }
 }
 
-function confidenceValue() {
-  return elements.confidenceField.querySelector("input[name='confidence']:checked")?.value || "unsure";
+function confidenceSelection() {
+  return {
+    value: elements.confidenceField.querySelector("input[name='confidence']:checked")?.value || "unsure",
+    source: confidenceTouched ? "explicit" : "default",
+  };
 }
 
 function canonicalLabels(value) {
@@ -363,7 +442,9 @@ function canonicalLabels(value) {
 
 function parseAnswer(rawValue) {
   let value = String(rawValue || "").trim();
-  let confidence = confidenceValue();
+  const selectedConfidence = confidenceSelection();
+  let confidence = selectedConfidence.value;
+  let confidenceSource = selectedConfidence.source;
   const confidencePrefixes = [
     { pattern: /^(?:\/?sure|确定)\s*[:：]?\s*(.+)$/iu, value: "sure" },
     { pattern: /^(?:\/?unsure|不确定)\s*[:：]?\s*(.+)$/iu, value: "unsure" },
@@ -373,12 +454,13 @@ function parseAnswer(rawValue) {
     const match = value.match(prefix.pattern);
     if (match) {
       confidence = prefix.value;
+      confidenceSource = "explicit";
       value = match[1];
       break;
     }
   }
   const response = canonicalLabels(value);
-  return response ? { response, confidence } : null;
+  return response ? { response, confidence, confidenceSource } : null;
 }
 
 function knownOptionLabels() {
@@ -410,6 +492,7 @@ function resetAnswerControls() {
   chat.setSelected("");
   const unsure = elements.confidenceField.querySelector("input[value='unsure']");
   if (unsure) unsure.checked = true;
+  confidenceTouched = false;
 }
 
 async function launchCoach() {
@@ -437,6 +520,10 @@ async function submitAnswer(answer) {
     return;
   }
 
+  const behaviorSnapshot = responseTimer.snapshot();
+  const behavior = behaviorSnapshot
+    ? { ...behaviorSnapshot, confidence_source: answer.confidenceSource }
+    : null;
   const certainty = answer.confidence === "sure" ? "确定" : answer.confidence === "guess" ? "猜的" : "不确定";
   chat.appendLearner(`${answer.response} · ${certainty}`);
   resetAnswerControls();
@@ -445,6 +532,7 @@ async function submitAnswer(answer) {
     return coach.answer({
       response: answer.response,
       confidence: answer.confidence,
+      behavior,
       expectedRevision: currentView.revision,
       expectedItemId: currentView.question.item_id,
     });
@@ -655,6 +743,7 @@ function renderOnboarding(message) {
 
 async function restoreExistingProfile() {
   elements.createProfile.disabled = true;
+  restoringProfile = true;
   setOperating(true, "正在只读检查本浏览器是否已有档案……");
   try {
     const coach = await getCoach();
@@ -692,6 +781,7 @@ async function restoreExistingProfile() {
     chat.setComposer({ enabled: false });
     chat.setStatus("本地状态校验失败 · 未覆盖", "error");
   } finally {
+    restoringProfile = false;
     setOperating(false);
   }
 }
@@ -706,9 +796,22 @@ elements.input.addEventListener("input", () => {
   elements.answerError.textContent = "";
   if (currentView?.state === "awaiting_answer") {
     const answer = parseAnswer(elements.input.value);
-    if (answer) chat.setSelected(answer.response);
+    if (answer) {
+      chat.setSelected(answer.response, { syncInput: false });
+      responseTimer.recordAnswer(answer.response);
+    }
   }
 });
+for (const input of elements.confidenceField.querySelectorAll("input[name='confidence']")) {
+  input.addEventListener("click", () => {
+    confidenceTouched = true;
+  });
+}
+document.addEventListener("visibilitychange", () => {
+  responseTimer.setVisible(document.visibilityState !== "hidden" && document.hasFocus());
+});
+window.addEventListener("blur", () => responseTimer.setVisible(false));
+window.addEventListener("focus", () => responseTimer.setVisible(document.visibilityState !== "hidden"));
 elements.input.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();

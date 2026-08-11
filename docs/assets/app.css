@@ -774,6 +774,7 @@ textarea[disabled] {
 
 .confidence-switch {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.55rem;
   padding: 0;
   margin: 0 0 0.7rem;
@@ -1083,6 +1084,11 @@ textarea[disabled] {
   border: 1px solid #cdbd9c;
 }
 
+.engine-card[data-engine-selectable="false"] {
+  cursor: default;
+  opacity: 1;
+}
+
 .engine-card:hover:not([disabled]) {
   background: var(--white);
   border-color: #9c8962;
@@ -1109,11 +1115,13 @@ textarea[disabled] {
 
 .engine-card[data-engine-state="needs_configuration"] .engine-card__state,
 .engine-card[data-engine-state="needs_login"] .engine-card__state,
+.engine-card[data-engine-state="framework_supported"] .engine-card__state,
 .engine-card[data-engine-state="ready_unverified"] .engine-card__state {
   color: #8b651f;
 }
 
 .engine-card[data-engine-state="probe_only"] .engine-card__state,
+.engine-card[data-engine-state="package_incompatible"] .engine-card__state,
 .engine-card[data-engine-state="incompatible"] .engine-card__state,
 .engine-card[data-engine-state="unavailable"] .engine-card__state {
   color: var(--cinnabar-dark);
@@ -1121,7 +1129,7 @@ textarea[disabled] {
 
 .engine-card__detail {
   grid-column: 1 / -1;
-  color: var(--ink-muted);
+  color: #626c82;
   font-size: 0.74rem;
 }
 

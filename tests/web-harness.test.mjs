@@ -223,6 +223,249 @@ test("real browser harness path starts ignorant, issues, grades, and stores no l
   coach.close();
 });
 
+test("a hesitant sure answer keeps the trusted grade but is excluded from stable evidence", async () => {
+  const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
+  const store = createMemoryCoachStore();
+  const coach = createBrowserCoach({
+    store,
+    worker: fixtureWorker(),
+    curriculum,
+    clock: () => "2026-08-10T08:00:00.000Z",
+    idFactory: idFactory(),
+  });
+  await coach.initialize();
+  const question = await coach.start();
+  const feedback = await coach.answer({
+    response: "B",
+    confidence: "sure",
+    behavior: {
+      schema_version: "web-response-observation.v1",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 180,
+      first_choice_seconds: 120,
+      answer_changes: 2,
+      confidence_source: "explicit",
+    },
+    expectedRevision: question.revision,
+    expectedItemId: question.question.item_id,
+  });
+  assert.equal(feedback.feedback.grade.correct, true);
+  assert.equal(feedback.feedback.grade.result, "mastered");
+  assert.equal(feedback.feedback.behavior.signal, "hesitant");
+  assert.equal(feedback.feedback.behavior.declared_confidence, "sure");
+  assert.equal(feedback.feedback.behavior.effective_confidence, "sure");
+  assert.match(feedback.feedback.behavior.summary, /有些犹豫/u);
+
+  const exported = await coach.exportData();
+  assert.deepEqual({
+    confidence: exported.attempts[0].confidence,
+    declared: exported.attempts[0].declared_confidence,
+    confidenceSource: exported.attempts[0].confidence_source,
+    signal: exported.attempts[0].behavior_signal,
+    duration: exported.attempts[0].duration_seconds,
+    changes: exported.attempts[0].answer_changes,
+  }, {
+    confidence: "sure",
+    declared: "sure",
+    confidenceSource: "explicit",
+    signal: "hesitant",
+    duration: 180,
+    changes: 2,
+  });
+  const recognition = exported.progress.topics[question.question.topic_id].mastery.recognition;
+  assert.equal(recognition.latest_qualified, false);
+  assert.equal(recognition.qualified_evidence.length, 0);
+  assert.equal(recognition.next_review_at, "2026-08-11");
+  for (const forbidden of ["\"response\":", "\"prompt\":", "\"options\":", "selection_trace", "keystrokes"]) {
+    assert.equal(JSON.stringify(exported).includes(forbidden), false, forbidden);
+  }
+  coach.close();
+});
+
+test("unsure, guessed, and legacy unsure answers never become qualified pass evidence", () => {
+  let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  const variants = [
+    { confidence: "unsure" },
+    {
+      confidence: "unsure",
+      declared_confidence: "unsure",
+      confidence_source: "default",
+      behavior_signal: "steady",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 18,
+      first_choice_seconds: 10,
+      answer_changes: 0,
+    },
+    {
+      confidence: "unsure",
+      declared_confidence: "unsure",
+      confidence_source: "explicit",
+      behavior_signal: "hesitant",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 24,
+      first_choice_seconds: 12,
+      answer_changes: 0,
+    },
+    {
+      confidence: "guess",
+      declared_confidence: "guess",
+      confidence_source: "explicit",
+      behavior_signal: "likely_guess",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 8,
+      first_choice_seconds: 4,
+      answer_changes: 0,
+    },
+  ];
+  for (let index = 0; index < 8; index += 1) {
+    const variant = variants[index % variants.length];
+    progress = applyObjectiveAttempt(progress, {
+      ...attempt({
+        id: `unqualified-${index}`,
+        item: `unqualified-item-${index}`,
+        confidence: variant.confidence,
+        at: `2026-08-${index < 4 ? "10" : "11"}T0${index}:00:00.000Z`,
+      }),
+      ...variant,
+    }).progress;
+  }
+  const record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.qualified_evidence.length, 0);
+  assert.notEqual(record.status, "pass_ready");
+  assert.equal(record.mastery, 0);
+});
+
+test("unqualified correct answers cannot raise stability accuracy or recover pass readiness", () => {
+  let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  for (let index = 0; index < 8; index += 1) {
+    progress = applyObjectiveAttempt(progress, attempt({
+      id: `stable-base-${index}`,
+      item: `stable-base-item-${index}`,
+      score: index < 2 ? 0 : 1,
+      confidence: "sure",
+      at: `2026-08-${index < 4 ? "10" : "11"}T0${index}:00:00.000Z`,
+    })).progress;
+  }
+  let record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.qualified_evidence.length, 6);
+  assert.equal(record.stability_score_sum, 6);
+  assert.equal(record.stability_max_score_sum, 8);
+  assert.equal(record.status, "fragile");
+  assert.equal(record.mastery, 0.75);
+
+  for (let index = 0; index < 2; index += 1) {
+    progress = applyObjectiveAttempt(progress, attempt({
+      id: `default-unsure-${index}`,
+      item: `default-unsure-item-${index}`,
+      confidence: "unsure",
+      at: `2026-08-12T0${index}:00:00.000Z`,
+    })).progress;
+  }
+  record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.stability_score_sum, 6);
+  assert.equal(record.stability_max_score_sum, 8);
+  assert.equal(record.status, "fragile");
+  assert.equal(record.mastery, 0.75);
+});
+
+test("a clean qualified retest can recover a behavior regression", () => {
+  let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  for (let index = 0; index < 6; index += 1) {
+    progress = applyObjectiveAttempt(progress, attempt({
+      id: `ready-${index}`,
+      item: `ready-item-${index}`,
+      at: `2026-08-${index < 3 ? "10" : "11"}T0${index}:00:00.000Z`,
+    })).progress;
+  }
+  progress = applyObjectiveAttempt(progress, {
+    ...attempt({
+      id: "hesitant-regression",
+      item: "ready-item-0",
+      at: "2026-08-12T08:00:00.000Z",
+    }),
+    declared_confidence: "sure",
+    confidence_source: "explicit",
+    behavior_signal: "hesitant",
+    timing_source: "live",
+    timing_quality: "clean",
+    duration_seconds: 90,
+    first_choice_seconds: 60,
+    answer_changes: 2,
+  }).progress;
+  let record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.status, "fragile");
+  assert.equal(record.regression_active, true);
+
+  progress = applyObjectiveAttempt(progress, attempt({
+    id: "clean-retest",
+    item: "ready-item-0",
+    at: "2026-08-13T08:00:00.000Z",
+  })).progress;
+  record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.status, "pass_ready");
+  assert.equal(record.regression_active, false);
+});
+
+test("store reads and exports replay attempts instead of trusting stale derived progress", async () => {
+  const store = createMemoryCoachStore();
+  let staleProgress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  const actualAttempts = [];
+  for (let index = 0; index < 6; index += 1) {
+    staleProgress = applyObjectiveAttempt(staleProgress, attempt({
+      id: `stale-sure-${index}`,
+      item: `stale-item-${index}`,
+      at: `2026-08-${index < 3 ? "10" : "11"}T0${index}:00:00.000Z`,
+    })).progress;
+    actualAttempts.push(attempt({
+      id: `actual-unsure-${index}`,
+      item: `actual-item-${index}`,
+      confidence: "unsure",
+      at: `2026-08-${index < 3 ? "10" : "11"}T0${index}:00:00.000Z`,
+    }));
+  }
+  assert.equal(staleProgress.topics["K08.SOFTWARE_PROCESS_MODELS"].status, "pass_ready");
+  store.progress = staleProgress;
+  store.attempts = new Map(actualAttempts.map((value) => [value.attempt_id, value]));
+
+  const replayed = await store.getProgress();
+  const record = replayed.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.status, "learning");
+  assert.equal(record.qualified_evidence.length, 0);
+  assert.equal(record.mastery, 0);
+  assert.deepEqual((await store.exportData()).progress, replayed);
+  store.close();
+});
+
+test("invalid behavior metadata is rejected before the answer state is occupied", async () => {
+  const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
+  const store = createMemoryCoachStore();
+  const coach = createBrowserCoach({ store, worker: fixtureWorker(), curriculum, idFactory: idFactory() });
+  await coach.initialize();
+  const question = await coach.start();
+  await assert.rejects(coach.answer({
+    response: "B",
+    confidence: "sure",
+    behavior: {
+      schema_version: "web-response-observation.v1",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 10,
+      first_choice_seconds: 5,
+      answer_changes: 0,
+      selection_trace: ["A", "B"],
+    },
+    expectedRevision: question.revision,
+    expectedItemId: question.question.item_id,
+  }), { code: "INVALID_RESPONSE_BEHAVIOR" });
+  assert.equal(coach.getView().state, "awaiting_answer");
+  assert.equal((await coach.exportData()).attempts.length, 0);
+  coach.close();
+});
+
 test("attempt replay is exact, changed time conflicts, and revision CAS admits one publisher", async () => {
   const store = createMemoryCoachStore();
   const now = "2026-08-10T08:00:00.000Z";
