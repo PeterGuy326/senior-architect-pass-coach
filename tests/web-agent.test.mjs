@@ -213,7 +213,7 @@ test("public-page pairing makes no Runtime fetch until an exact popup grant is a
   assert.equal(calls[0].url, `${DEFAULT_RUNTIME_ORIGIN}/v1/adapters`);
   assert.equal(calls[0].options.headers.Authorization, `Bearer ${token}`);
   assert.equal(calls[0].options.mode, "cors");
-  assert.equal(calls[0].options.targetAddressSpace, "local");
+  assert.equal(Object.hasOwn(calls[0].options, "targetAddressSpace"), false);
   assert.equal(connected.connected, true);
   assert.equal(connected.instance_id, "paired-runtime");
   assert.equal(connected.adapters[0].id, "claude-code");

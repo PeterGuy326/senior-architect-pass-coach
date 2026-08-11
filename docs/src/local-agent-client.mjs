@@ -435,9 +435,9 @@ export class LocalAgentClient {
         credentials: "omit",
         cache: "no-store",
         redirect: "error",
-        // Chrome's LNA RequestInit enum calls both RFC1918 and loopback
-        // destinations "local". The URL itself remains pinned to 127.0.0.1.
-        targetAddressSpace: "local",
+        // Keep targetAddressSpace unset for the pinned 127.0.0.1 literal.
+        // Current LNA distinguishes loopback from the "local" address space;
+        // declaring "local" here makes Chromium reject the resolved loopback.
       });
     } catch {
       throw clientError("RUNTIME_UNREACHABLE", "本机 Agent Runtime 暂时无法连接。");
