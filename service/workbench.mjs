@@ -9,6 +9,7 @@ import { assertNoIdentityFields, deidentifyProgressSnapshot } from "./privacy.mj
 import { ProgressEngineClient } from "./progress-engine.mjs";
 import { authorizeProgressWrites, validateTeachingOutput } from "./proposal-validator.mjs";
 import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validator.mjs";
+import { consumeTrustedObjectiveAuthorization } from "./trusted-grader.mjs";
 
 const PERSONAL_ACTIONS = new Set([
   "status",
@@ -20,6 +21,7 @@ const PERSONAL_ACTIONS = new Set([
   "case",
   "essay",
 ]);
+const OPAQUE_MATERIAL_LOCATOR = /^question:[A-Za-z0-9][A-Za-z0-9._:-]{0,1000}$/u;
 
 function cleanRequestPayload(payload) {
   if (payload === undefined) return {};
@@ -39,6 +41,25 @@ function cleanRequestPayload(payload) {
   ]) {
     if (key in clone) {
       throw new CoachError("IDENTITY_FIELD_LEAK", `教学请求不能包含身份字段 ${key}。`);
+    }
+  }
+  if (clone.approved_materials !== undefined) {
+    if (!Array.isArray(clone.approved_materials)) {
+      throw new CoachError("INVALID_TEACHING_PAYLOAD", "approved_materials 必须是数组。 ");
+    }
+    for (const material of clone.approved_materials) {
+      if (
+        !material ||
+        typeof material !== "object" ||
+        Array.isArray(material) ||
+        typeof material.locator !== "string" ||
+        !OPAQUE_MATERIAL_LOCATOR.test(material.locator)
+      ) {
+        throw new CoachError(
+          "RESOURCE_PATH_LEAK",
+          "approved material locator 必须是 Harness 生成的 opaque question locator。",
+        );
+      }
     }
   }
   return clone;
@@ -158,9 +179,12 @@ export class LocalCoachWorkbench {
     const context = await this.context({ required: PERSONAL_ACTIONS.has(action) });
     await validateEmployeeOutput(output);
     const validated = validateTeachingOutput(output, { action, context });
+    const verifiedAuthorizations = trustedAuthorizations.map(
+      (authorization) => consumeTrustedObjectiveAuthorization(authorization),
+    );
     const writes = authorizeProgressWrites(
       validated.proposed_progress_events,
-      trustedAuthorizations,
+      verifiedAuthorizations,
       context,
     );
     const receipts = [];

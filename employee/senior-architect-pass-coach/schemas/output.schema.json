@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/PeterGuy326/senior-architect-pass-coach/blob/main/employee/schemas/output.schema.json",
+  "$id": "https://github.com/PeterGuy326/senior-architect-pass-coach/blob/main/employee/senior-architect-pass-coach/schemas/output.schema.json",
   "title": "Senior Architect Pass Coach portable structured teaching result",
   "type": "object",
   "additionalProperties": false,
@@ -102,7 +102,10 @@
       ]
     },
     "sourceRef": {
-      "const": "senior-software-architect-review"
+      "enum": [
+        "senior-software-architect-review",
+        "user-supplied-local-review-material"
+      ]
     },
     "teachingResult": {
       "type": "object",

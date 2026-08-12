@@ -242,7 +242,27 @@
           "mode": "generate",
           "subject": "comprehensive",
           "topic_ids": ["availability"],
-          "count": 1
+          "question_ids": ["practice-availability-1"],
+          "count": 1,
+          "active_item": {
+            "item_id": "practice-availability-1",
+            "kind": "multiple_choice",
+            "subject": "comprehensive",
+            "topic_id": "availability",
+            "prompt": "Synthetic practice: choose the best option for the stated availability requirement.",
+            "options": [
+              { "label": "A", "text": "Option A" },
+              { "label": "B", "text": "Option B" }
+            ],
+            "source_refs": []
+          },
+          "approved_materials": [
+            {
+              "source_id": "senior-software-architect-review",
+              "locator": "question:practice-availability-1:material:1",
+              "excerpt": "Synthetic public practice item without an answer."
+            }
+          ]
         }
       },
       "expectedOutput": {
@@ -287,10 +307,30 @@
           "mode": "evaluate",
           "subject": "comprehensive",
           "topic_ids": ["availability"],
+          "question_ids": ["practice-availability-1"],
+          "active_item": {
+            "item_id": "practice-availability-1",
+            "kind": "multiple_choice",
+            "subject": "comprehensive",
+            "topic_id": "availability",
+            "prompt": "Synthetic practice: choose the best option for the stated availability requirement.",
+            "options": [
+              { "label": "A", "text": "Option A" },
+              { "label": "B", "text": "Option B" }
+            ],
+            "source_refs": ["senior-software-architect-review"]
+          },
           "submission": {
             "item_id": "practice-availability-1",
             "response": "A"
-          }
+          },
+          "approved_materials": [
+            {
+              "source_id": "senior-software-architect-review",
+              "locator": "question:practice-availability-1:trusted-grade",
+              "excerpt": "Synthetic trusted fixture: the submitted response is not mastered; reference answer B."
+            }
+          ]
         }
       },
       "expectedOutput": {

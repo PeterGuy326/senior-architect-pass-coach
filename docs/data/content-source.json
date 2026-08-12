@@ -1,0 +1,58 @@
+{
+  "schema_version": "web-content-source.v1",
+  "source_id": "senior-software-architect-review",
+  "license": "NOASSERTION",
+  "content_included": false,
+  "curriculum": {
+    "repository": "PeterGuy326/senior-architect-pass-coach",
+    "commit": "6136d3dfc771276867c41404787eb881c07db8bc",
+    "path": "config/curriculum.json",
+    "sha256": "sha256:add2159a15803965d1adcdfdf20280650f836230c617184f58d6208124069c2b"
+  },
+  "papers": {
+    "repository": "PeterGuy326/senior-software-architect-review",
+    "commit": "88f4bdc58e668ac887f2f06e152f69a1c129edd1",
+    "files": [
+      {
+        "path": "past-papers/comprehensive-by-year/2025上.md",
+        "sha256": "sha256:d9563b54c32f4a87526d74f1c3cd6a4fc138f740511b7e8b3f671da468b072dc",
+        "source_type": "recalled_real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2023下.md",
+        "sha256": "sha256:7d030281911fd0148b2017d51b2b2629b437f740905b16af37b8896e5a42ff2b",
+        "source_type": "recalled_real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2022.md",
+        "sha256": "sha256:c9d2a70d8f79727795a19766962090e3db8bb8aab2809ddba47a6b81287cfc08",
+        "source_type": "real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2021.md",
+        "sha256": "sha256:099bcd631653cecfef4b1f8e3c07c9438e65ffcbef92295f5148a062f297283b",
+        "source_type": "real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2020.md",
+        "sha256": "sha256:f8610e3d5e3c1201808d3e7bc7206d55790a309641f990e0996c91e8cc0320c6",
+        "source_type": "recalled_real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2019下.md",
+        "sha256": "sha256:8ae7fb55e9972454509a28fb5c94059a5f7b67d43efc0cd01ebed0efdd39007c",
+        "source_type": "real"
+      },
+      {
+        "path": "past-papers/comprehensive-by-year/2018下.md",
+        "sha256": "sha256:a97e96b84d2492bed4b17e93f9fe8e91287fd776012bed972579bf26ab85644f",
+        "source_type": "real"
+      }
+    ]
+  },
+  "limits": {
+    "timeout_ms": 10000,
+    "max_file_bytes": 262144,
+    "max_total_bytes": 1048576
+  }
+}

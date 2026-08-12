@@ -1,0 +1,14 @@
+{
+  "name": "架构过线私塾",
+  "short_name": "过线私教",
+  "description": "系统架构设计师过线私教：在浏览器本地诊断、刷题和复习弱项。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4ecd9",
+  "theme_color": "#17213f",
+  "categories": ["education", "productivity"]
+}

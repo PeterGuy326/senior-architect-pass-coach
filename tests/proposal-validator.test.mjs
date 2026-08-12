@@ -121,6 +121,33 @@ test("answers cannot be revealed before a submit action", () => {
   );
 });
 
+test("hidden output cannot smuggle an answer through summary or recommendations", () => {
+  const summaryLeak = validOutput({ action: "practice", scope: "personalized" });
+  summaryLeak.teaching_result.summary = "正确答案是 B，解析稍后补充。";
+  assert.throws(
+    () => validateTeachingOutput(summaryLeak, {
+      action: "practice",
+      context: { authenticated: true, user_id: "local:test" },
+    }),
+    (error) => error.code === "ANSWER_GATE_VIOLATION",
+  );
+
+  const recommendationLeak = validOutput({ action: "review", scope: "personalized" });
+  recommendationLeak.teaching_result.recommendations = [{
+    subject: "comprehensive",
+    topic_id: "K01",
+    priority: 1,
+    reason: "答案：A",
+  }];
+  assert.throws(
+    () => validateTeachingOutput(recommendationLeak, {
+      action: "review",
+      context: { authenticated: true, user_id: "local:test" },
+    }),
+    (error) => error.code === "ANSWER_GATE_VIOLATION",
+  );
+});
+
 test("schema-compliant case result is accepted by the outer proposal validator", async () => {
   const event = {
     schema_version: "progress-event-proposal.v1",
