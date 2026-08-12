@@ -58,7 +58,7 @@ test("response timing is normalized by bounded question reading load", () => {
   assert.ok(logicHeavy > shortOptions);
 });
 
-test("personal timing needs enough bounded evidence and only adjusts the question-normalized expectation", () => {
+test("personal timing needs twelve bounded observations and only adjusts the question-normalized expectation", () => {
   const question = {
     prompt: "某业务系统需要在一致性、可用性、恢复时间和实现成本之间权衡，请选择最符合约束的架构战术。".repeat(2),
     options: ["方案甲".repeat(12), "方案乙".repeat(12), "方案丙".repeat(12), "方案丁".repeat(12)],
@@ -67,15 +67,15 @@ test("personal timing needs enough bounded evidence and only adjusts the questio
   const insufficient = estimateQuestionDuration(question, {
     personalBaseline: {
       schema_version: "web-response-baseline.v1",
-      eligible_count: 5,
-      pace_bucket_counts: { very_fast: 0, fast: 5, expected: 0, deliberate: 0, extended: 0 },
+      eligible_count: 11,
+      pace_bucket_counts: { very_fast: 0, fast: 11, expected: 0, deliberate: 0, extended: 0 },
     },
   });
   const established = estimateQuestionDuration(question, {
     personalBaseline: {
       schema_version: "web-response-baseline.v1",
-      eligible_count: 6,
-      pace_bucket_counts: { very_fast: 0, fast: 6, expected: 0, deliberate: 0, extended: 0 },
+      eligible_count: 12,
+      pace_bucket_counts: { very_fast: 0, fast: 12, expected: 0, deliberate: 0, extended: 0 },
     },
   });
   assert.equal(insufficient.baseline_source, "population");
@@ -85,17 +85,17 @@ test("personal timing needs enough bounded evidence and only adjusts the questio
   assert.equal(established.base_expected_seconds, population.base_expected_seconds);
 });
 
-test("a short-question pace converges only after six matching personal observations", () => {
+test("a short-question pace converges only after twelve matching personal observations", () => {
   const question = { prompt: "选择正确项", options: ["甲", "乙"] };
-  const fiveFast = {
+  const elevenFast = {
     schema_version: "web-response-baseline.v1",
-    eligible_count: 5,
-    pace_bucket_counts: { very_fast: 0, fast: 5, expected: 0, deliberate: 0, extended: 0 },
+    eligible_count: 11,
+    pace_bucket_counts: { very_fast: 0, fast: 11, expected: 0, deliberate: 0, extended: 0 },
   };
-  const sixFast = {
-    ...fiveFast,
-    eligible_count: 6,
-    pace_bucket_counts: { ...fiveFast.pace_bucket_counts, fast: 6 },
+  const twelveFast = {
+    ...elevenFast,
+    eligible_count: 12,
+    pace_bucket_counts: { ...elevenFast.pace_bucket_counts, fast: 12 },
   };
   const observation = live({ duration: 6.4, first: 2.5, changes: 0 });
   const before = assessResponseBehavior({
@@ -103,14 +103,14 @@ test("a short-question pace converges only after six matching personal observati
     observation,
     declaredConfidence: "sure",
     correct: true,
-    personalBaseline: fiveFast,
+    personalBaseline: elevenFast,
   });
   const established = assessResponseBehavior({
     question,
     observation,
     declaredConfidence: "sure",
     correct: true,
-    personalBaseline: sixFast,
+    personalBaseline: twelveFast,
   });
 
   assert.equal(before.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
@@ -125,14 +125,14 @@ test("a short-question pace converges only after six matching personal observati
     observation: { ...observation, confidence_source: "inferred" },
     declaredConfidence: "auto",
     correct: true,
-    personalBaseline: fiveFast,
+    personalBaseline: elevenFast,
   });
   const inferredEstablished = assessResponseBehavior({
     question,
     observation: { ...observation, confidence_source: "inferred" },
     declaredConfidence: "auto",
     correct: true,
-    personalBaseline: sixFast,
+    personalBaseline: twelveFast,
   });
   assert.equal(inferredBefore.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
   assert.equal(inferredBefore.effective_confidence, "unsure");
@@ -150,7 +150,7 @@ test("a short-question pace converges only after six matching personal observati
       observation,
       declaredConfidence: variant.confidence,
       correct: variant.correct,
-      personalBaseline: sixFast,
+      personalBaseline: twelveFast,
     }).signal, variant.expected);
   }
   assert.notEqual(assessResponseBehavior({
@@ -158,14 +158,14 @@ test("a short-question pace converges only after six matching personal observati
     observation: { ...observation, timing_quality: "interrupted" },
     declaredConfidence: "sure",
     correct: true,
-    personalBaseline: sixFast,
+    personalBaseline: twelveFast,
   }).signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
   assert.notEqual(assessResponseBehavior({
     question,
     observation: live({ duration: 2, first: 1, changes: 0 }),
     declaredConfidence: "sure",
     correct: true,
-    personalBaseline: sixFast,
+    personalBaseline: twelveFast,
   }).signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
 });
 
@@ -216,9 +216,9 @@ test("automatic evidence infers confidence conservatively from timing quality an
   assert.equal(revised.effective_confidence, "unsure");
 
   const deliberate = assess({ duration: expected * 2, first: expected * 1.85 });
-  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.STEADY);
-  assert.equal(deliberate.effective_confidence, "sure");
-  assert.equal(objectiveResult({ correct: true, confidence: deliberate.effective_confidence }), "mastered");
+  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
+  assert.equal(deliberate.effective_confidence, "unsure");
+  assert.equal(objectiveResult({ correct: true, confidence: deliberate.effective_confidence }), "needs_retest");
 
   const restored = assess({
     duration: expected,
@@ -261,7 +261,7 @@ test("hesitation changes the review signal without rewriting trusted objective c
   assert.equal(objectiveResult({ correct: true, confidence: fastUnsure.effective_confidence }), "needs_retest");
 });
 
-test("slow reading alone is deliberate, while revision and explicit confidence remain decisive", () => {
+test("slow reading and revision both trigger conservative retest evidence", () => {
   const expected = estimateQuestionReadingSeconds(QUESTION);
   const deliberate = assessResponseBehavior({
     question: QUESTION,
@@ -269,9 +269,9 @@ test("slow reading alone is deliberate, while revision and explicit confidence r
     declaredConfidence: "sure",
     correct: true,
   });
-  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.STEADY);
-  assert.equal(deliberate.reason_code, "deliberate_reading_only");
-  assert.match(deliberate.summary, /慢读本身不等于不会/u);
+  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
+  assert.equal(deliberate.reason_code, "deliberate_duration");
+  assert.match(deliberate.summary, /不作为稳定掌握证据/u);
 
   const revised = assessResponseBehavior({
     question: QUESTION,
@@ -281,6 +281,44 @@ test("slow reading alone is deliberate, while revision and explicit confidence r
   });
   assert.equal(revised.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
   assert.equal(revised.reason_code, "revision_heavy");
+});
+
+test("total active duration is primary and timing boundaries fail conservatively", () => {
+  const expected = estimateQuestionReadingSeconds(QUESTION);
+  const auto = ({ duration, first, changes = 0, correct = true }) => assessResponseBehavior({
+    question: QUESTION,
+    observation: live({ duration, first, changes, confidenceSource: "inferred" }),
+    declaredConfidence: "auto",
+    correct,
+  });
+
+  const justFast = auto({ duration: (expected * 0.55) - 0.1, first: expected * 0.3 });
+  const justSteady = auto({ duration: (expected * 0.55) + 0.1, first: expected * 0.3 });
+  assert.equal(justFast.timing_band, "fast");
+  assert.equal(justFast.effective_confidence, "unsure");
+  assert.equal(justSteady.timing_band, "steady");
+  assert.equal(justSteady.effective_confidence, "sure");
+
+  const steadyUpper = auto({ duration: (expected * 1.6) - 0.1, first: expected * 0.4 });
+  const deliberate = auto({ duration: (expected * 1.6) + 0.1, first: expected * 0.4 });
+  const deliberateUpper = auto({ duration: expected * 2.4, first: expected * 0.4 });
+  const extended = auto({ duration: (expected * 2.4) + 0.1, first: expected * 0.4 });
+  assert.equal(steadyUpper.timing_band, "steady");
+  assert.equal(deliberate.timing_band, "deliberate");
+  assert.equal(deliberate.effective_confidence, "unsure");
+  assert.equal(deliberateUpper.timing_band, "deliberate");
+  assert.equal(extended.timing_band, "extended");
+  assert.equal(extended.effective_confidence, "unsure");
+
+  const waitedAfterInstantChoice = auto({ duration: expected, first: expected * 0.1 });
+  assert.equal(waitedAfterInstantChoice.timing_band, "early_choice");
+  assert.equal(waitedAfterInstantChoice.reason_code, "early_choice_ambiguous");
+  assert.equal(waitedAfterInstantChoice.effective_confidence, "unsure");
+
+  const revisedOnce = auto({ duration: expected, first: expected * 0.5, changes: 1 });
+  assert.equal(revisedOnce.timing_band, "steady");
+  assert.equal(revisedOnce.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
+  assert.equal(revisedOnce.effective_confidence, "unsure");
 });
 
 test("guess, overconfidence, rapid correctness and restored timing remain distinct", () => {

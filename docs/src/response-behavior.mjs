@@ -22,6 +22,11 @@ const OBSERVATION_KEYS = new Set([
   "confidence_source",
 ]);
 const MAX_CONTINUOUS_ACTIVE_MILLISECONDS = 10 * 60 * 1_000;
+const PERSONAL_BASELINE_MINIMUM = 12;
+const FAST_RATIO = 0.55;
+const DELIBERATE_RATIO = 1.6;
+const EXTENDED_RATIO = 2.4;
+const EARLY_CHOICE_RATIO = 0.25;
 
 function behaviorError(message) {
   const error = new Error(message);
@@ -96,18 +101,18 @@ function baselineAdjustment(raw) {
     Array.isArray(counts)
   ) return Object.freeze({ source: "population", multiplier: 1, sample_count: 0 });
   const ordered = [
-    ["very_fast", 0.65],
-    ["fast", 0.65],
+    ["very_fast", 0.8],
+    ["fast", 0.8],
     ["expected", 1],
-    ["deliberate", 1.35],
-    ["extended", 1.7],
+    ["deliberate", 1.25],
+    ["extended", 1.25],
   ];
   const values = ordered.map(([key]) => counts[key]);
   if (values.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 48)) {
     return Object.freeze({ source: "population", multiplier: 1, sample_count: 0 });
   }
   const total = values.reduce((sum, value) => sum + value, 0);
-  if (raw.eligible_count !== total || total < 6 || total > 48) {
+  if (raw.eligible_count !== total || total < PERSONAL_BASELINE_MINIMUM || total > 48) {
     return Object.freeze({ source: "population", multiplier: 1, sample_count: total });
   }
   const midpoint = (total + 1) / 2;
@@ -122,7 +127,7 @@ function baselineAdjustment(raw) {
   }
   return Object.freeze({
     source: "personal",
-    multiplier: clamp(median, 0.65, 1.3),
+    multiplier: clamp(median, 0.8, 1.25),
     sample_count: total,
   });
 }
@@ -223,16 +228,11 @@ function timingBand(observation) {
   const expected = observation.expected_duration_seconds;
   const duration = observation.duration_seconds;
   const firstChoice = observation.first_choice_seconds;
-  const changes = observation.answer_changes;
-  if (
-    changes >= 2 ||
-    (changes >= 1 && duration > expected * 1.35)
-  ) return "revision_heavy";
-  if (
-    duration < expected * 0.5 ||
-    (firstChoice < expected * 0.25 && duration < expected * 0.65)
-  ) return "fast";
-  if (duration > expected * 1.8 || firstChoice > expected * 1.75) return "deliberate";
+  const ratio = duration / expected;
+  if (ratio < FAST_RATIO) return "fast";
+  if (ratio > EXTENDED_RATIO) return "extended";
+  if (firstChoice < expected * EARLY_CHOICE_RATIO) return "early_choice";
+  if (ratio > DELIBERATE_RATIO) return "deliberate";
   return "steady";
 }
 
@@ -263,7 +263,7 @@ export function calibrateResponseConfidence({
   const normalized = normalizeResponseObservation(observation, { question, personalBaseline });
   const band = timingBand(normalized);
   const inferred = declaredConfidence === "auto";
-  const effectiveConfidence = inferred && ["steady", "deliberate"].includes(band)
+  const effectiveConfidence = inferred && band === "steady"
     && normalized.timing_source === "live"
     && normalized.timing_quality === "clean"
     && normalized.answer_changes === 0
@@ -290,23 +290,33 @@ function signalSummary(signal, calibration) {
     : `（按${reference}预计约 ${expected} 秒；前台有效用时 ${duration} 秒${changes ? `，改选 ${changes} 次` : "，未反复改选"}）`;
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.FLUENT) return `答题节奏呈熟练倾向${evidence}。`;
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.HESITANT) {
-    return calibration.observation.confidence_source === "explicit" && calibration.declared_confidence === "unsure"
-      ? `你明确标记了“不确定”${evidence}，本题按较保守的证据处理。`
-      : `答题节奏显示有些犹豫${evidence}，本题按较保守的证据处理。`;
+    if (calibration.observation.confidence_source === "explicit" && calibration.declared_confidence === "unsure") {
+      return `你明确标记了“不确定”${evidence}，本题按较保守的证据处理。`;
+    }
+    if (calibration.timing_band === "extended") {
+      return `这题用时明显超出参考区间${evidence}，说明当前提取还不够顺畅；已安排复测。`;
+    }
+    if (calibration.timing_band === "deliberate") {
+      return `这题用时高于参考区间${evidence}；慢读不等于答错，但本次还不作为稳定掌握证据。`;
+    }
+    return `答题节奏显示有些犹豫${evidence}，本题按较保守的证据处理。`;
   }
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS) {
-    return calibration.observation.confidence_source === "explicit"
-      ? `你明确标记了“我在猜”${evidence}，即使答对也仍需复测。`
+    if (calibration.observation.confidence_source === "explicit") {
+      return `你明确标记了“我在猜”${evidence}，即使答对也仍需复测。`;
+    }
+    return calibration.timing_band === "early_choice"
+      ? `很早就完成首次选择且结果错误${evidence}；后来等待不会改变这条证据，后续会换题复测。`
       : `这次很快作答且结果错误${evidence}，更像猜测；后续会换题复测。`;
   }
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.OVERCONFIDENT_WRONG) return `先前标记为确定但结果错误${evidence}；这更像熟悉感误判，已进入优先复测。`;
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT) {
+    if (calibration.timing_band === "early_choice") {
+      return `很早就完成首次选择${evidence}，即使后来等待到正常总用时，也暂不能排除猜测；本题安排复测。`;
+    }
     return calibration.timing_band === "fast"
       ? `这题答得很快${evidence}，但单题无法区分熟练与猜中；暂不根据用时下结论。`
       : "这题没有完整、连续的前台计时，不根据用时推断熟练度。";
-  }
-  if (calibration.timing_band === "deliberate") {
-    return `这题用时高于参考区间${evidence}，但没有反复改选；慢读本身不等于不会。`;
   }
   return `答题节奏正常${evidence}；单题不足以判断已经熟练。`;
 }
@@ -335,17 +345,25 @@ export function assessResponseBehavior({
   } else if (calibration.timing_band === "unknown") {
     signal = RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT;
     reasonCode = "timing_unavailable";
-  } else if (calibration.timing_band === "revision_heavy") {
+  } else if (calibration.observation.answer_changes >= 1) {
     signal = RESPONSE_BEHAVIOR_SIGNALS.HESITANT;
     reasonCode = "revision_heavy";
+  } else if (calibration.timing_band === "early_choice") {
+    signal = correct
+      ? RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT
+      : RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS;
+    reasonCode = correct ? "early_choice_ambiguous" : "early_choice_wrong_guess_risk";
   } else if (calibration.timing_band === "fast") {
     signal = correct
       ? RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT
       : RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS;
     reasonCode = correct ? "fast_correct_ambiguous" : "fast_wrong_guess_risk";
+  } else if (calibration.timing_band === "extended") {
+    signal = RESPONSE_BEHAVIOR_SIGNALS.HESITANT;
+    reasonCode = "extended_duration";
   } else if (calibration.timing_band === "deliberate") {
-    signal = RESPONSE_BEHAVIOR_SIGNALS.STEADY;
-    reasonCode = "deliberate_reading_only";
+    signal = RESPONSE_BEHAVIOR_SIGNALS.HESITANT;
+    reasonCode = "deliberate_duration";
   } else if (
     correct &&
     calibration.effective_confidence === "sure" &&

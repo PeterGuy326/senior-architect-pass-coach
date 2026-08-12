@@ -44,10 +44,11 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /confidence_source:\s*"inferred"/u);
   const html = await readFile(new URL("../docs/index.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /name="confidence"|id="confidence-field"|<legend>自报把握度<\/legend>/u);
-  assert.match(html, /不用自报把握度/u);
+  assert.match(html, /按题目长短计算参考用时.*实际前台有效用时/u);
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
   assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
   assert.doesNotMatch(css, /\.confidence-switch/u);
+  assert.match(css, /\.timing-receipt/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

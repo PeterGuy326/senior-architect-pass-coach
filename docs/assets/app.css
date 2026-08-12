@@ -695,6 +695,65 @@ textarea[disabled] {
   border-top: 1px dashed #d2ae9e;
 }
 
+.timing-receipt {
+  margin-top: 1rem;
+  padding: 0.85rem 0.9rem;
+  background: linear-gradient(135deg, rgba(230, 238, 232, 0.9), rgba(248, 243, 230, 0.9));
+  border: 1px solid #a7bbae;
+  border-left: 4px solid var(--jade);
+}
+
+.timing-receipt__title {
+  margin: 0 0 0.7rem !important;
+  color: #365f57;
+  font-family: var(--font-note);
+  font-size: 0.88rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.timing-receipt__list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.timing-receipt__item {
+  min-width: 0;
+  padding-right: 0.7rem;
+  border-right: 1px solid rgba(74, 104, 94, 0.25);
+}
+
+.timing-receipt__item:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.timing-receipt dt {
+  color: #4f596e;
+  font-size: 0.72rem;
+}
+
+.timing-receipt dd {
+  margin: 0.2rem 0;
+  color: var(--ink);
+  font-family: var(--font-editorial);
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.timing-receipt__value {
+  display: block;
+}
+
+.timing-receipt small {
+  display: block;
+  color: #59647a;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
 .annotation__mark {
   font-size: 1.35rem;
   line-height: 1;
@@ -1277,6 +1336,21 @@ textarea[disabled] {
 
   .message__paper::before {
     display: none;
+  }
+
+  .timing-receipt__list {
+    grid-template-columns: 1fr;
+  }
+
+  .timing-receipt__item {
+    padding: 0 0 0.55rem;
+    border-right: 0;
+    border-bottom: 1px solid rgba(74, 104, 94, 0.2);
+  }
+
+  .timing-receipt__item:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
   }
 
   .option-panel,

@@ -110,6 +110,64 @@ function humanTaskState(task, index, completed) {
   return "pending";
 }
 
+function secondsText(value) {
+  const number = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(number) || number < 0) return "计时不完整";
+  return `${Math.round(number * 10) / 10} 秒`;
+}
+
+const QUESTION_LOAD_LABELS = Object.freeze({
+  short: "短题",
+  standard: "标准题",
+  long: "长题",
+  very_long: "长材料题",
+});
+
+export function buildTimingReceipt(behavior, { correct = null } = {}) {
+  if (!behavior || typeof behavior !== "object") return null;
+  const expected = typeof behavior.expected_duration_seconds === "number"
+    ? behavior.expected_duration_seconds
+    : Number.NaN;
+  const duration = typeof behavior.duration_seconds === "number"
+    ? behavior.duration_seconds
+    : Number.NaN;
+  const complete = behavior.timing_source === "live"
+    && behavior.timing_quality === "clean"
+    && Number.isFinite(expected)
+    && expected > 0
+    && Number.isFinite(duration)
+    && duration >= 0;
+  const load = QUESTION_LOAD_LABELS[behavior.question_load] || "本题";
+  const source = behavior.baseline_source === "personal" ? "个人历史校正" : "按题目长度估算";
+  let judgement = "计时不完整 · 本题不按用时判断";
+  if (complete) {
+    if (behavior.reason_code === "revision_heavy") judgement = "发生真实改选 · 需要复测";
+    else if (behavior.timing_band === "early_choice") judgement = "首次选择过早 · 暂不能排除猜测";
+    else if (behavior.timing_band === "fast") judgement = correct === false
+      ? "明显偏快且答错 · 疑似猜测"
+      : "明显偏快 · 需要复测";
+    else if (["deliberate", "extended"].includes(behavior.timing_band)) judgement = "用时偏长 · 需要复测";
+    else if (behavior.timing_band === "unknown" || behavior.signal === "insufficient_signal") {
+      judgement = "计时或证据不完整 · 需要复测";
+    }
+    else if (correct === false) judgement = "用时正常 · 但答案错误";
+    else if (
+      correct === true
+      && behavior.timing_band === "steady"
+      && behavior.signal === "fluent"
+      && behavior.effective_confidence === "sure"
+    ) judgement = "节奏正常 · 可形成掌握证据";
+    else judgement = "节奏正常 · 但行为证据不足，需复测";
+  }
+  return Object.freeze({
+    reference: Number.isFinite(expected) && expected > 0 ? `约 ${secondsText(expected)}` : "暂无参考",
+    referenceBasis: `${load} · ${source}`,
+    actual: complete ? secondsText(duration) : "计时不完整",
+    comparison: complete ? `实际约为参考的 ${Math.round((duration / expected) * 100)}%` : "刷新、切走或中断后不作推断",
+    judgement,
+  });
+}
+
 function feedbackCopy(feedback) {
   const grade = feedback?.grade ?? feedback ?? {};
   const result = asText(grade.result ?? grade.status).toLowerCase();
@@ -131,6 +189,7 @@ function feedbackCopy(feedback) {
     reference: asText(grade.reference_answer ?? grade.answer),
     explanation: asText(grade.explanation ?? grade.analysis ?? feedback?.message),
     behavior: asText(feedback?.behavior?.summary),
+    timing: buildTimingReceipt(feedback?.behavior, { correct: grade.correct === true }),
   };
 }
 
@@ -156,7 +215,7 @@ export function createChatView({
   let currentQuestion = null;
   let agentChatAvailable = false;
 
-  function appendMessage(role, { paragraphs = [], question, annotation, action } = {}) {
+  function appendMessage(role, { paragraphs = [], question, timing, annotation, action } = {}) {
     const item = node("li", `message message--${role}`);
     const byline = node("div", "message__byline");
     const chop = node("span", "teacher-chop", role === "learner" ? "我" : role === "system" ? "记" : "师");
@@ -176,6 +235,26 @@ export function createChatView({
       if (topic) meta.append(node("span", "", topic));
       meta.append(node("span", "", "作答前不显示答案"));
       paper.append(meta, node("p", "question-prompt", asText(question.prompt, "题目暂时无法显示。")));
+    }
+
+    if (timing) {
+      const receipt = node("section", "timing-receipt");
+      receipt.setAttribute("aria-label", "本题用时判定");
+      receipt.append(node("h3", "timing-receipt__title", "本题用时判定"));
+      const list = node("dl", "timing-receipt__list");
+      for (const [label, value, detail] of [
+        ["参考用时", timing.reference, timing.referenceBasis],
+        ["有效用时", timing.actual, timing.comparison],
+        ["本次判断", timing.judgement, "以相对用时为主，对错与改选作校验"],
+      ]) {
+        const group = node("div", "timing-receipt__item");
+        const description = node("dd");
+        description.append(node("span", "timing-receipt__value", value), node("small", "", detail));
+        group.append(node("dt", "", label), description);
+        list.append(group);
+      }
+      receipt.append(list);
+      paper.append(receipt);
     }
 
     if (annotation) {
@@ -366,7 +445,10 @@ export function createChatView({
       if (copy.behavior) paragraphs.push(copy.behavior);
       if (copy.reference) paragraphs.push(`参考答案：${copy.reference}`);
       if (copy.explanation) paragraphs.push(copy.explanation);
-      appendCoach(paragraphs, { annotation: "用时只是辅助信号；不会单凭快答升级掌握，刷新或切走页面后的残缺计时也不作推断。" });
+      appendCoach(paragraphs, {
+        timing: copy.timing,
+        annotation: "自动判断以相对做题时间为主；固定答案决定对错，真实改选只会让证据更保守。",
+      });
       setComposer({ enabled: true });
     } else if (state === "complete") {
       optionPanel.hidden = true;

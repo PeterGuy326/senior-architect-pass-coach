@@ -283,6 +283,54 @@ test("the Page answer shape infers stable evidence without asking the learner fo
   coach.close();
 });
 
+test("Page time model sends fast, slow, early-choice and revised correct answers to retest", async () => {
+  const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
+  const scenarios = [
+    { name: "fast", duration: 5, first: 2, changes: 0, band: "fast", signal: "insufficient_signal" },
+    { name: "early", duration: 12, first: 1, changes: 0, band: "early_choice", signal: "insufficient_signal" },
+    { name: "slow", duration: 24, first: 8, changes: 0, band: "deliberate", signal: "hesitant" },
+    { name: "extended", duration: 36, first: 8, changes: 0, band: "extended", signal: "hesitant" },
+    { name: "revised", duration: 12, first: 6, changes: 1, band: "steady", signal: "hesitant" },
+  ];
+
+  for (const scenario of scenarios) {
+    const store = createMemoryCoachStore();
+    const coach = createBrowserCoach({
+      store,
+      worker: fixtureWorker(),
+      curriculum,
+      clock: () => "2026-08-10T08:00:00.000Z",
+      idFactory: idFactory(),
+    });
+    await coach.initialize();
+    const question = await coach.start();
+    const feedback = await coach.answer({
+      response: "B",
+      confidence: "auto",
+      behavior: {
+        schema_version: "web-response-observation.v1",
+        timing_source: "live",
+        timing_quality: "clean",
+        duration_seconds: scenario.duration,
+        first_choice_seconds: scenario.first,
+        answer_changes: scenario.changes,
+        confidence_source: "inferred",
+      },
+      expectedRevision: question.revision,
+      expectedItemId: question.question.item_id,
+    });
+    assert.equal(feedback.feedback.grade.result, "needs_retest", scenario.name);
+    assert.equal(feedback.feedback.behavior.timing_band, scenario.band, scenario.name);
+    assert.equal(feedback.feedback.behavior.signal, scenario.signal, scenario.name);
+    assert.equal(
+      store.progress.topics[question.question.topic_id].mastery.recognition.next_review_at,
+      "2026-08-11",
+      scenario.name,
+    );
+    coach.close();
+  }
+});
+
 test("a hesitant sure answer keeps the trusted grade but is excluded from stable evidence", async () => {
   const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
   const store = createMemoryCoachStore();
@@ -315,7 +363,7 @@ test("a hesitant sure answer keeps the trusted grade but is excluded from stable
   assert.equal(feedback.feedback.behavior.signal, "hesitant");
   assert.equal(feedback.feedback.behavior.declared_confidence, "sure");
   assert.equal(feedback.feedback.behavior.effective_confidence, "sure");
-  assert.match(feedback.feedback.behavior.summary, /有些犹豫/u);
+  assert.match(feedback.feedback.behavior.summary, /超出参考区间|有些犹豫/u);
 
   const exported = await coach.exportData();
   assert.deepEqual({

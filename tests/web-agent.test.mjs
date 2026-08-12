@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createMemoryCoachStore } from "../docs/src/indexeddb-store.mjs";
+import { buildTimingReceipt } from "../docs/src/chat-view.mjs";
 import { createBrowserCoach } from "../docs/src/harness.mjs";
 import {
   DEFAULT_RUNTIME_ORIGIN,
@@ -24,6 +25,68 @@ const TEST_WORKSPACE = Object.freeze({
   }),
   memory_owner: "browser_harness",
   agent_role: "replaceable_brain",
+});
+
+test("timing receipt makes the automatic time calculation explicit", () => {
+  const base = {
+    timing_source: "live",
+    timing_quality: "clean",
+    expected_duration_seconds: 24,
+    duration_seconds: 12,
+    question_load: "standard",
+    baseline_source: "population",
+    timing_band: "fast",
+    reason_code: "fast_correct_ambiguous",
+    signal: "insufficient_signal",
+    effective_confidence: "unsure",
+  };
+  assert.deepEqual(buildTimingReceipt(base, { correct: true }), {
+    reference: "约 24 秒",
+    referenceBasis: "标准题 · 按题目长度估算",
+    actual: "12 秒",
+    comparison: "实际约为参考的 50%",
+    judgement: "明显偏快 · 需要复测",
+  });
+  assert.equal(buildTimingReceipt({
+    ...base,
+    timing_quality: "interrupted",
+    duration_seconds: null,
+  }, { correct: true }).judgement, "计时不完整 · 本题不按用时判断");
+  assert.equal(buildTimingReceipt({
+    ...base,
+    duration_seconds: null,
+  }, { correct: true }).actual, "计时不完整");
+  assert.equal(buildTimingReceipt({
+    ...base,
+    timing_band: "steady",
+    duration_seconds: 23,
+    baseline_source: "personal",
+    reason_code: "clean_inferred_correct",
+    signal: "fluent",
+    effective_confidence: "sure",
+  }, { correct: true }).judgement, "节奏正常 · 可形成掌握证据");
+  assert.equal(buildTimingReceipt({
+    ...base,
+    timing_band: "early_choice",
+    duration_seconds: 24,
+    reason_code: "early_choice_ambiguous",
+  }, { correct: true }).judgement, "首次选择过早 · 暂不能排除猜测");
+  assert.equal(buildTimingReceipt({
+    ...base,
+    timing_band: "unknown",
+    duration_seconds: 24,
+    reason_code: "timing_unavailable",
+    signal: "insufficient_signal",
+    effective_confidence: "unsure",
+  }, { correct: true }).judgement, "计时或证据不完整 · 需要复测");
+  assert.equal(buildTimingReceipt({
+    ...base,
+    timing_band: "steady",
+    duration_seconds: 24,
+    reason_code: "explicit_unsure",
+    signal: "hesitant",
+    effective_confidence: "unsure",
+  }, { correct: true }).judgement, "节奏正常 · 但行为证据不足，需复测");
 });
 
 function catalogResponse(adapters = [], overrides = {}) {
