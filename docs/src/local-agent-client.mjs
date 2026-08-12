@@ -546,11 +546,13 @@ export class LocalAgentClient {
     return new Promise((resolve, reject) => {
       let settled = false;
       let popup = popupRef;
+      let closePoll = null;
       const finish = (error, grant) => {
         if (settled) return;
         settled = true;
         windowRef.removeEventListener("message", onMessage);
         globalThis.clearTimeout(timeout);
+        if (closePoll !== null) globalThis.clearInterval(closePoll);
         try { popup?.close?.(); } catch { /* best-effort popup cleanup */ }
         if (error) reject(error);
         else resolve(grant);
@@ -587,6 +589,11 @@ export class LocalAgentClient {
       const timeout = globalThis.setTimeout(() => {
         finish(clientError("PAIRING_TIMEOUT", "本机 Agent 配对已超时，请重新连接。"));
       }, timeoutMs);
+      closePoll = globalThis.setInterval(() => {
+        if (popup?.closed) {
+          finish(clientError("PAIRING_POPUP_CLOSED", "本机连接窗口已关闭，请重新点击目标 Agent。"));
+        }
+      }, 250);
       if (popup) {
         try {
           navigatePopup(popup, pairUrl.href);
@@ -642,7 +649,17 @@ export class LocalAgentClient {
     if (result.protocol !== LOOPBACK_PROTOCOL) {
       throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
     }
-    return safeAdapter(result.adapter);
+    const adapter = safeAdapter(result.adapter);
+    if (
+      adapter.id !== "codex"
+      || adapter.state !== "experimental_personal"
+      || adapter.selectable !== true
+      || adapter.execution_mode !== "personal_experimental"
+      || adapter.framework_adapter_status !== "probe_only"
+    ) {
+      throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了无效的 Codex 个人模式状态。");
+    }
+    return adapter;
   }
 
   async coach({ phase, engine, message = "", publicQuestion = null, trustedGrade = null, deidentifiedProgress } = {}) {

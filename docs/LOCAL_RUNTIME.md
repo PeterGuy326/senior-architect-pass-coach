@@ -7,9 +7,9 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 1. 从 [GitHub Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 解压并打开 `Senior Architect Pass Coach.app`；Linux x64（glibc 2.28+，不适用于 Alpine/musl）解压并运行 `start-local-coach`。
 3. macOS 首次解压后打开一次 `.app`，让系统登记 `senior-architect-pass-coach://` 启动入口。它是固定、无参数的 launch-only 信号；应用启动器忽略系统传入的全部参数，网页不会在这里放令牌、配对 state、命令、URL 或文件路径。Runtime 仍只监听 `http://127.0.0.1:43127`。
-4. 在 Pages 点击“连接本机 Agent”。网页先在这次用户点击内探测固定健康端点：已经运行就直接配对；macOS 没有运行时才用上面的固定入口唤起应用并短暂等待，Linux 必须先手工运行 `start-local-coach`。只有健康响应同时匹配协议、状态和实例标识后，等待窗口才会进入 Runtime 自己的确认页。点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络。
+4. 在 Pages 的私教大脑面板里直接点击目标 Agent 卡片。网页会在这次点击内探测固定健康端点：已经运行就直接配对；macOS 没有运行时才用上面的固定入口唤起应用并短暂等待，Linux 必须先手工运行 `start-local-coach`。只有健康响应同时匹配协议、状态和实例标识后，等待窗口才会进入 Runtime 自己的确认页。点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络；目标 Agent 通过检查后会自动进入对话。
 5. Runtime 先用 Digital Employee 密封一份只读员工工作区，并将员工名、版本和 digest 返回给 Page；Schema 校验、兼容性探测和执行都绑定到该工作区。
-6. 回到同一个 Pages 页面，从 Runtime 实际检查为“可用”的 Agent 中选择一个作为私教“大脑”。Codex 会先显示“需要本人同意”，确认复用本机 Codex / ChatGPT 登录后才可选。答题仍由固定答案键批改；提交后才会追加 Agent 的个性化讲解，也可以继续追问。
+6. Runtime 只会激活刚才点击且实际检查为“可用”的 Agent，不会回退到其他模型。Codex 会先显示“需要本人同意”，确认复用本机 Codex / ChatGPT 登录后才进入对话。答题仍由固定答案键批改；提交后才会追加 Agent 的个性化讲解，也可以继续追问。
 
 不需要 clone 仓库、安装 npm 包或编译源码。当前 macOS 包是未 notarize 的开源预览版；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。首次启动可先在 Finder 中右键应用并选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。
 

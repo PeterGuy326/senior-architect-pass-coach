@@ -392,6 +392,23 @@ test("public-page pairing makes no Runtime fetch until an exact popup grant is a
   assert.equal(browser.popup.closed, true);
 });
 
+test("closing the Runtime confirmation window fails fast and releases the pairing listener", async () => {
+  const browser = pairingWindow();
+  const client = createLocalAgentClient({
+    fetchImpl: async () => {
+      throw new Error("no Runtime request should be made without a grant");
+    },
+    idFactory: () => "closed-popup-state-1234567890-abcdef",
+  });
+
+  const pending = client.pair({ windowRef: browser.windowRef, timeoutMs: 5_000 });
+  assert.equal(browser.listeners.size, 1);
+  browser.popup.closed = true;
+  await assert.rejects(pending, { code: "PAIRING_POPUP_CLOSED" });
+  assert.equal(browser.listeners.size, 0);
+  assert.equal(client.connected, false);
+});
+
 test("a running Runtime is probed and paired without invoking the launch scheme", async () => {
   const browser = pairingWindow();
   const token = "r".repeat(43);
@@ -691,6 +708,39 @@ test("Codex personal consent is explicit, memory-only, and returns an experiment
   assert.equal(calls[2].options.headers.Authorization, `Bearer ${token}`);
   assert.equal(calls[2].url.includes(token), false);
   assert.equal(String(calls[2].options.body).includes(token), false);
+});
+
+test("Codex personal consent rejects a selectable response for the wrong adapter", async () => {
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "codex-wrong-adapter-response",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "c".repeat(43), instance_id: "codex-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) {
+        return jsonResponse(catalogResponse([{
+          id: "codex",
+          label: "Codex CLI",
+          state: "consent_required",
+          selectable: false,
+        }]));
+      }
+      return jsonResponse({
+        protocol: LOOPBACK_PROTOCOL,
+        adapter: {
+          id: "qwen-code",
+          label: "Qwen Code",
+          state: "experimental_personal",
+          selectable: true,
+          execution_mode: "personal_experimental",
+          framework_adapter_status: "probe_only",
+        },
+      });
+    },
+  });
+  await client.connect();
+  await assert.rejects(client.consentCodexPersonal(), { code: "INVALID_ADAPTER_RESPONSE" });
 });
 
 test("Runtime failures expose only a stable reason code and local message, never server text", async () => {
