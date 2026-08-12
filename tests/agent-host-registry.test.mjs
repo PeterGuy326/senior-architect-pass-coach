@@ -39,16 +39,35 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /Codex CLI 个人实验模式/u);
   assert.match(source, /consentCodexPersonal/u);
   assert.match(source, /个人实验模式尚未通过 Digital Employee 工具白名单认证/u);
+  assert.match(source, /DIRECT_CONNECT_AGENT_IDS\s*=\s*new Set\(\["claude-code", "codex", "qwen-code", "codebuddy"\]\)/u);
+  assert.match(source, /return connectRuntime\(\{ preferredEngine: engine \}\)/u);
+  assert.match(source, /selectEngine\(preferredEngine, \{ enterConversation: true \}\)/u);
+  assert.match(source, /elements\.engineDialog\.close\(\)/u);
+  assert.match(source, /elements\.input\.focus\(\{ preventScroll: true \}\)/u);
+  assert.match(source, /选择 Agent 不会自动发送消息/u);
+  const entryConversationSource = source.slice(
+    source.indexOf("async function enterAgentConversation"),
+    source.indexOf("async function selectEngine"),
+  );
+  assert.doesNotMatch(entryConversationSource, /\.initialize\(|chat\.clear\(/u);
+  assert.match(entryConversationSource, /chat\.setComposer\(\{[\s\S]*enabled:\s*true/u);
+  assert.match(source, /currentView\?\.state \?\? "ready"/u);
+  assert.match(source, /匿名 Agent 对话 · 尚未建立学习档案/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /confidence:\s*"auto"/u);
   assert.match(source, /confidence_source:\s*"inferred"/u);
   const html = await readFile(new URL("../docs/index.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /name="confidence"|id="confidence-field"|<legend>自报把握度<\/legend>/u);
   assert.match(html, /按题目长短计算参考用时.*实际前台有效用时/u);
+  assert.match(html, /直接点击想用的 Agent/u);
+  assert.match(html, /检测全部本机 Agent/u);
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
   assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
+  assert.match(css, /\.engine-card\[data-engine-entry="direct"\]/u);
   assert.doesNotMatch(css, /\.confidence-switch/u);
   assert.match(css, /\.timing-receipt/u);
+  const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
+  assert.match(serviceWorker, /architect-pass-coach-pages-v12/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

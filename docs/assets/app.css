@@ -1106,6 +1106,21 @@ textarea[disabled] {
   cursor: pointer;
 }
 
+.engine-card[data-engine-entry="direct"]:not([disabled]) {
+  background: linear-gradient(100deg, #f8f2e4 0%, #eef2e8 100%);
+  border-color: #9c8962;
+  box-shadow: inset 3px 0 0 var(--indigo-soft);
+}
+
+.engine-card[data-engine-entry="direct"]:not([disabled]) .engine-card__state {
+  color: var(--indigo-soft);
+}
+
+.engine-card[data-engine-entry="direct"]:focus-visible {
+  outline: 3px solid var(--cinnabar-dark);
+  outline-offset: 2px;
+}
+
 .engine-card:hover:not([disabled]) {
   background: var(--white);
   border-color: #9c8962;

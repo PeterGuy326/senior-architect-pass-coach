@@ -18,9 +18,9 @@
 
 1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 首次解压后打开一次 `.app`，让系统登记 `senior-architect-pass-coach://` 启动入口；Runtime 仍只在 `127.0.0.1:43127` 启动配对桥。这个入口只负责启动应用，不接收令牌、命令、文件路径或网页参数。
-3. 在 Pages 点击“连接本机 Agent”。网页先检测 Runtime 是否已经运行；已运行就直接进入配对。macOS 未运行时会尝试唤起已安装应用，Linux 则需先运行 `start-local-coach`。只有识别到正确 Runtime 后才把等待窗口导航到本机确认页，因此未安装或启动失败不会再打开一个坏掉的 `127.0.0.1` 页面。
+3. 在 Pages 的私教大脑面板里直接点击 `Codex CLI`、`Claude Code`、`Qwen Code` 或 `CodeBuddy Code`。网页会检测 Runtime；macOS 未运行时会尝试唤起已安装应用，Linux 则需先运行 `start-local-coach`。确认并验证目标 Agent 可用后，页面会自动选择它、关闭面板并进入对话；不会偷偷改选其他模型。
 4. Runtime 会先密封一份只读 Digital Employee 员工工作区，并把员工名、版本和摘要绑定到本次会话；探测、Schema 校验和实际执行都使用这一份工作区。
-5. 从 Runtime 实际检查通过的引擎中选择一个作为私教“大脑”。选择 Codex 时还会出现一次明确的个人模式授权；可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
+5. Runtime 只会激活你点击的那个引擎；它不可用时会留在基础私教，不会改选其他“大脑”。选择 Codex 时还会出现一次明确的个人模式授权；可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
 
 这是“下载应用并打开”，不是 clone 仓库、安装 npm 依赖或本地编译。当前预览包尚未做 Apple notarization；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。macOS 首次打开可先在 Finder 中右键选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。Pages 在加载时不会扫描本机端口；只有点击连接后才访问固定的 loopback 地址并请求浏览器许可。
 
