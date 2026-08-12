@@ -286,19 +286,16 @@ function adapterDiagnostic(adapter) {
 }
 
 async function enterAgentConversation(engine) {
-  const coach = await getCoach();
-  if (!initialized) {
-    chat.clear();
-    const initial = await coach.initialize({ dailyMinutes: 45 });
-    initialized = true;
-    updateFromView(initial);
-  }
   if (elements.engineDialog.open && typeof elements.engineDialog.close === "function") {
     elements.engineDialog.close();
   } else {
     elements.engineDialog.removeAttribute("open");
   }
   chat.appendSystem(`${engineDisplayName(engine)} 已接入。现在可以直接输入问题；选择 Agent 不会自动发送消息。`);
+  chat.setComposer({
+    enabled: true,
+    answering: currentView?.state === "awaiting_answer",
+  });
   elements.input.focus({ preventScroll: true });
 }
 
@@ -508,11 +505,11 @@ function setOperating(value, message = "") {
   if (value) {
     chat.setComposer({ enabled: initialized, busy: true });
     chat.setStatus(message || "正在处理……", "busy");
-  } else if (initialized && currentView) {
+  } else if ((initialized && currentView) || agentChatAvailable()) {
     chat.setComposer({
       enabled: true,
-      answering: currentView.state === "awaiting_answer",
-      busy: BUSY_STATES.has(currentView.state),
+      answering: currentView?.state === "awaiting_answer",
+      busy: BUSY_STATES.has(currentView?.state),
     });
     if (elements.statusLine.dataset.state === "busy") {
       chat.setStatus(`本地档案 · revision ${currentView.revision ?? "—"}`, currentView.state);
@@ -809,12 +806,12 @@ async function handleChatInput(rawValue) {
 
   chat.appendLearner(raw);
   resetAnswerControls();
-  if (!initialized) {
-    chat.appendCoach(["我还没有获得本浏览器档案的本地授权。请先点击“建档并开始诊断”。"]);
-  } else if (currentView?.state === "awaiting_answer") {
+  if (currentView?.state === "awaiting_answer") {
     chat.appendCoach(["这是一道客观题，请输入 A–H；多选可输入 AC 或 A,C。要看可用指令，输入“帮助”。"]);
   } else if (agentChatAvailable()) {
     await askAgent(raw);
+  } else if (!initialized) {
+    chat.appendCoach(["我还没有获得本浏览器档案的本地授权。请先点击“建档并开始诊断”。"]);
   } else {
     showHelp();
   }

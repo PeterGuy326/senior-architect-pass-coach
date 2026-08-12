@@ -45,6 +45,12 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /elements\.engineDialog\.close\(\)/u);
   assert.match(source, /elements\.input\.focus\(\{ preventScroll: true \}\)/u);
   assert.match(source, /选择 Agent 不会自动发送消息/u);
+  const entryConversationSource = source.slice(
+    source.indexOf("async function enterAgentConversation"),
+    source.indexOf("async function selectEngine"),
+  );
+  assert.doesNotMatch(entryConversationSource, /\.initialize\(|chat\.clear\(/u);
+  assert.match(entryConversationSource, /chat\.setComposer\(\{[\s\S]*enabled:\s*true/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /confidence:\s*"auto"/u);
   assert.match(source, /confidence_source:\s*"inferred"/u);

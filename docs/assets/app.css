@@ -1117,7 +1117,7 @@ textarea[disabled] {
 }
 
 .engine-card[data-engine-entry="direct"]:focus-visible {
-  outline: 3px solid rgba(180, 60, 45, 0.35);
+  outline: 3px solid var(--cinnabar-dark);
   outline-offset: 2px;
 }
 
