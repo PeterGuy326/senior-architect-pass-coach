@@ -716,7 +716,7 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
   const question = await coach.start();
   const feedback = await coach.answer({
     response: "B",
-    confidence: "sure",
+    confidence: "auto",
     behavior: {
       schema_version: "web-response-observation.v1",
       timing_source: "live",
@@ -724,7 +724,7 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
       duration_seconds: 15,
       first_choice_seconds: 9,
       answer_changes: 0,
-      confidence_source: "explicit",
+      confidence_source: "inferred",
     },
     expectedRevision: question.revision,
     expectedItemId: question.question.item_id,
@@ -739,7 +739,7 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
   assert.equal(serialized.includes("private/path"), false);
   assert.equal(agentPayload.deidentifiedProgress.schema_version, "deidentified-progress.v1");
   assert.equal(agentPayload.trustedGrade.reference_answer, "B");
-  assert.equal(agentPayload.deidentifiedProgress.recommendations[0].reason_code, "clean_confident_correct");
+  assert.equal(agentPayload.deidentifiedProgress.recommendations[0].reason_code, "clean_inferred_correct");
   for (const forbidden of [
     "duration_seconds",
     "first_choice_seconds",

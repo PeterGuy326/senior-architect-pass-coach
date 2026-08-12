@@ -7,8 +7,8 @@ export const RESPONSE_BEHAVIOR_SIGNALS = Object.freeze({
   STEADY: "steady",
 });
 
-const CONFIDENCE = new Set(["guess", "unsure", "sure"]);
-const CONFIDENCE_SOURCES = new Set(["default", "explicit"]);
+const CONFIDENCE = new Set(["guess", "unsure", "sure", "auto"]);
+const CONFIDENCE_SOURCES = new Set(["default", "explicit", "inferred"]);
 const TIMING_SOURCES = new Set(["live", "restored", "unavailable"]);
 const TIMING_QUALITIES = new Set(["clean", "interrupted", "resumed", "unavailable"]);
 const PACE_BUCKETS = new Set(["very_fast", "fast", "expected", "deliberate", "extended", "unavailable"]);
@@ -259,15 +259,24 @@ export function calibrateResponseConfidence({
   declaredConfidence = "unsure",
   personalBaseline = null,
 } = {}) {
-  if (!CONFIDENCE.has(declaredConfidence)) throw behaviorError("自报把握度无效。");
+  if (!CONFIDENCE.has(declaredConfidence)) throw behaviorError("作答把握度模式无效。");
   const normalized = normalizeResponseObservation(observation, { question, personalBaseline });
   const band = timingBand(normalized);
+  const inferred = declaredConfidence === "auto";
+  const effectiveConfidence = inferred && ["steady", "deliberate"].includes(band)
+    && normalized.timing_source === "live"
+    && normalized.timing_quality === "clean"
+    && normalized.answer_changes === 0
+    ? "sure"
+    : (inferred ? "unsure" : declaredConfidence);
   return Object.freeze({
-    observation: normalized,
+    observation: inferred
+      ? Object.freeze({ ...normalized, confidence_source: "inferred" })
+      : normalized,
     timing_band: band,
     pace_bucket: paceBucket(normalized),
     declared_confidence: declaredConfidence,
-    effective_confidence: declaredConfidence,
+    effective_confidence: effectiveConfidence,
   });
 }
 
@@ -290,7 +299,7 @@ function signalSummary(signal, calibration) {
       ? `你明确标记了“我在猜”${evidence}，即使答对也仍需复测。`
       : `这次很快作答且结果错误${evidence}，更像猜测；后续会换题复测。`;
   }
-  if (signal === RESPONSE_BEHAVIOR_SIGNALS.OVERCONFIDENT_WRONG) return `自报确定但结果错误${evidence}；这更像熟悉感误判，已进入优先复测。`;
+  if (signal === RESPONSE_BEHAVIOR_SIGNALS.OVERCONFIDENT_WRONG) return `先前标记为确定但结果错误${evidence}；这更像熟悉感误判，已进入优先复测。`;
   if (signal === RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT) {
     return calibration.timing_band === "fast"
       ? `这题答得很快${evidence}，但单题无法区分熟练与猜中；暂不根据用时下结论。`
@@ -339,17 +348,18 @@ export function assessResponseBehavior({
     reasonCode = "deliberate_reading_only";
   } else if (
     correct &&
-    declaredConfidence === "sure" &&
-    confidenceIsExplicit &&
+    calibration.effective_confidence === "sure" &&
+    (confidenceIsExplicit || declaredConfidence === "auto") &&
     calibration.observation.answer_changes === 0
   ) {
     signal = RESPONSE_BEHAVIOR_SIGNALS.FLUENT;
-    reasonCode = "clean_confident_correct";
+    reasonCode = declaredConfidence === "auto" ? "clean_inferred_correct" : "clean_confident_correct";
   }
 
   if (!PACE_BUCKETS.has(calibration.pace_bucket)) throw behaviorError("作答节奏分桶无效。");
   return Object.freeze({
     schema_version: "web-response-behavior.v1",
+    confidence_mode: declaredConfidence === "auto" ? "inferred" : "declared",
     signal,
     reason_code: reasonCode,
     timing_band: calibration.timing_band,
@@ -357,7 +367,7 @@ export function assessResponseBehavior({
     timing_source: calibration.observation.timing_source,
     timing_quality: calibration.observation.timing_quality,
     confidence_source: calibration.observation.confidence_source,
-    declared_confidence: declaredConfidence,
+    ...(declaredConfidence === "auto" ? {} : { declared_confidence: declaredConfidence }),
     effective_confidence: calibration.effective_confidence,
     duration_seconds: calibration.observation.duration_seconds,
     first_choice_seconds: calibration.observation.first_choice_seconds,

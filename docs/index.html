@@ -82,7 +82,7 @@
               <span><strong>52</strong>安全目标</span>
             </div>
           </div>
-          <p class="score-note">策略：高频考点优先，错题复测优先，猜对不算掌握。</p>
+          <p class="score-note">策略：高频考点优先，错题复测优先，疑似猜中先复测。</p>
         </section>
 
         <section class="ledger ledger--progress" aria-labelledby="progress-title">
@@ -144,21 +144,6 @@
           <div class="option-panel" id="option-panel" hidden aria-label="题目选项"></div>
 
           <form class="answer-composer" id="answer-form" aria-label="提交答案">
-            <fieldset class="confidence-switch" id="confidence-field" disabled>
-              <legend>自报把握度</legend>
-              <label>
-                <input type="radio" name="confidence" value="unsure" checked>
-                <span>不确定</span>
-              </label>
-              <label>
-                <input type="radio" name="confidence" value="sure">
-                <span>确定</span>
-              </label>
-              <label>
-                <input type="radio" name="confidence" value="guess">
-                <span>我在猜</span>
-              </label>
-            </fieldset>
             <div class="answer-row">
               <label class="sr-only" for="answer-input">输入 A 到 H 中的选项，或向已连接的 Agent 提问</label>
               <textarea
@@ -175,7 +160,7 @@
               ></textarea>
               <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
             </div>
-            <p class="answer-hint" id="answer-hint">选答案前不会显示正确项和解析。私教会结合前台有效用时、首次选择和改选次数辅助判断；快答不会把“不确定”自动升级为掌握。</p>
+            <p class="answer-hint" id="answer-hint">不用自报把握度。私教会按题目长短、前台有效用时、首次选择、改选次数和个人历史自动判断；快答正确不会直接算掌握。</p>
             <p class="form-error" id="answer-error" role="alert"></p>
           </form>
         </section>

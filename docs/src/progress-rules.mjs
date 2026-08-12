@@ -21,6 +21,7 @@ const BEHAVIOR_SIGNALS = new Set([
 ]);
 const BEHAVIOR_REASON_CODES = new Set([
   "clean_confident_correct",
+  "clean_inferred_correct",
   "confident_wrong",
   "deliberate_reading_only",
   "explicit_guess",
@@ -247,9 +248,9 @@ function validateAttempt(attempt) {
   }
   const hasBehavior = Object.hasOwn(attempt, "behavior_signal");
   if (hasBehavior) {
+    const inferredConfidence = attempt.confidence_source === "inferred";
     if (
-      !CONFIDENCE.has(attempt.declared_confidence) ||
-      !["default", "explicit"].includes(attempt.confidence_source) ||
+      !["default", "explicit", "inferred"].includes(attempt.confidence_source) ||
       !BEHAVIOR_SIGNALS.has(attempt.behavior_signal) ||
       (Object.hasOwn(attempt, "behavior_reason_code") && !BEHAVIOR_REASON_CODES.has(attempt.behavior_reason_code)) ||
       (Object.hasOwn(attempt, "pace_bucket") && !PACE_BUCKET_SET.has(attempt.pace_bucket)) ||
@@ -258,8 +259,14 @@ function validateAttempt(attempt) {
       (attempt.timing_source === "live" && !["clean", "interrupted"].includes(attempt.timing_quality)) ||
       (attempt.timing_source === "restored" && attempt.timing_quality !== "resumed") ||
       (attempt.timing_source === "unavailable" && attempt.timing_quality !== "unavailable") ||
-      (attempt.declared_confidence !== "sure" && attempt.confidence !== attempt.declared_confidence) ||
-      (attempt.declared_confidence === "sure" && !["sure", "unsure"].includes(attempt.confidence)) ||
+      (inferredConfidence && (
+        Object.hasOwn(attempt, "declared_confidence") || !["sure", "unsure"].includes(attempt.confidence)
+      )) ||
+      (!inferredConfidence && (
+        !CONFIDENCE.has(attempt.declared_confidence) ||
+        (attempt.declared_confidence !== "sure" && attempt.confidence !== attempt.declared_confidence) ||
+        (attempt.declared_confidence === "sure" && !["sure", "unsure"].includes(attempt.confidence))
+      )) ||
       !(attempt.duration_seconds === null || (
         Number.isFinite(attempt.duration_seconds) && attempt.duration_seconds >= 0 && attempt.duration_seconds <= 1_800
       )) ||
@@ -332,7 +339,7 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
   record.latest_confidence = attempt.confidence;
   record.latest_behavior_signal = attempt.behavior_signal || null;
   record.latest_behavior_reason_code = attempt.behavior_reason_code || ({
-    fluent: "clean_confident_correct",
+    fluent: attempt.confidence_source === "inferred" ? "clean_inferred_correct" : "clean_confident_correct",
     hesitant: "revision_heavy",
     likely_guess: "fast_wrong_guess_risk",
     overconfident_wrong: "confident_wrong",
@@ -341,13 +348,14 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
   }[attempt.behavior_signal] || null);
   const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong", "insufficient_signal"]
     .includes(attempt.behavior_signal);
-  const stabilityEligible = attempt.confidence === "sure" && (!behaviorRisk || attempt.score === 0);
+  const qualifiedCorrect = attempt.score === 1 && attempt.confidence === "sure" && !behaviorRisk;
+  const stabilityEligible = attempt.score === 0 || qualifiedCorrect;
   if (stabilityEligible) {
     record.stability_score_sum = Number(record.stability_score_sum || 0) + attempt.score;
     record.stability_max_score_sum = Number(record.stability_max_score_sum || 0) + attempt.max_score;
   }
-  record.latest_qualified = attempt.score === 1 && attempt.confidence === "sure" && !behaviorRisk;
-  if (wasPassReady && !record.latest_qualified) record.regression_active = true;
+  record.latest_qualified = qualifiedCorrect;
+  if (wasPassReady && attempt.score === 0) record.regression_active = true;
   if (record.latest_qualified) {
     record.qualified_evidence.push({
       attempt_id: attempt.attempt_id,
@@ -368,7 +376,7 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
     record.ever_pass_ready = true;
     record.regression_active = false;
   }
-  const interval = record.regression_active || attempt.score < 1 || attempt.confidence === "guess" || behaviorRisk
+  const interval = record.regression_active || !qualifiedCorrect
     ? 1
     : (record.status === "pass_ready" ? 14 : 3);
   record.next_review_at = addDays(dayOf(attempt.at), interval);

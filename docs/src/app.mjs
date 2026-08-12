@@ -23,7 +23,6 @@ const elements = Object.freeze({
   optionPanel: document.querySelector("#option-panel"),
   input: document.querySelector("#answer-input"),
   submitButton: document.querySelector("#submit-answer"),
-  confidenceField: document.querySelector("#confidence-field"),
   answerForm: document.querySelector("#answer-form"),
   answerError: document.querySelector("#answer-error"),
   sessionLabel: document.querySelector("#session-label"),
@@ -59,7 +58,6 @@ const chat = createChatView({
   optionPanel: elements.optionPanel,
   input: elements.input,
   submitButton: elements.submitButton,
-  confidenceField: elements.confidenceField,
   sessionLabel: elements.sessionLabel,
   sessionDot: elements.sessionDot,
   taskList: elements.taskList,
@@ -85,7 +83,6 @@ let runtimeWorkspace = null;
 let selectedEngine = "content-only";
 let connectingRuntime = false;
 let restoringProfile = false;
-let confidenceTouched = false;
 
 const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
 const PUBLIC_COACH_PAGE = location.origin === PUBLIC_COACH_ORIGIN;
@@ -487,13 +484,6 @@ async function operate(message, action) {
   }
 }
 
-function confidenceSelection() {
-  return {
-    value: elements.confidenceField.querySelector("input[name='confidence']:checked")?.value || "unsure",
-    source: confidenceTouched ? "explicit" : "default",
-  };
-}
-
 function canonicalLabels(value) {
   const labels = String(value || "")
     .toUpperCase()
@@ -506,26 +496,8 @@ function canonicalLabels(value) {
 }
 
 function parseAnswer(rawValue) {
-  let value = String(rawValue || "").trim();
-  const selectedConfidence = confidenceSelection();
-  let confidence = selectedConfidence.value;
-  let confidenceSource = selectedConfidence.source;
-  const confidencePrefixes = [
-    { pattern: /^(?:\/?sure|确定)\s*[:：]?\s*(.+)$/iu, value: "sure" },
-    { pattern: /^(?:\/?unsure|不确定)\s*[:：]?\s*(.+)$/iu, value: "unsure" },
-    { pattern: /^(?:\/?guess|猜)\s*[:：]?\s*(.+)$/iu, value: "guess" },
-  ];
-  for (const prefix of confidencePrefixes) {
-    const match = value.match(prefix.pattern);
-    if (match) {
-      confidence = prefix.value;
-      confidenceSource = "explicit";
-      value = match[1];
-      break;
-    }
-  }
-  const response = canonicalLabels(value);
-  return response ? { response, confidence, confidenceSource } : null;
+  const response = canonicalLabels(String(rawValue || "").trim());
+  return response ? { response } : null;
 }
 
 function knownOptionLabels() {
@@ -555,9 +527,6 @@ function recognizeCommand(rawValue) {
 function resetAnswerControls() {
   elements.input.value = "";
   chat.setSelected("");
-  const unsure = elements.confidenceField.querySelector("input[value='unsure']");
-  if (unsure) unsure.checked = true;
-  confidenceTouched = false;
 }
 
 async function launchCoach() {
@@ -587,16 +556,15 @@ async function submitAnswer(answer) {
 
   const behaviorSnapshot = responseTimer.snapshot();
   const behavior = behaviorSnapshot
-    ? { ...behaviorSnapshot, confidence_source: answer.confidenceSource }
+    ? { ...behaviorSnapshot, confidence_source: "inferred" }
     : null;
-  const certainty = answer.confidence === "sure" ? "确定" : answer.confidence === "guess" ? "猜的" : "不确定";
-  chat.appendLearner(`${answer.response} · ${certainty}`);
+  chat.appendLearner(answer.response);
   resetAnswerControls();
   await operate("正在按固定答案键批改……", async () => {
     const coach = await getCoach();
     return coach.answer({
       response: answer.response,
-      confidence: answer.confidence,
+      confidence: "auto",
       behavior,
       expectedRevision: currentView.revision,
       expectedItemId: currentView.question.item_id,
@@ -729,7 +697,7 @@ async function clearProfile() {
 function showHelp() {
   const lines = [
     "你可以像聊天一样输入：今天学什么、查看进度、继续、出题。",
-    "答题时直接输入 A、AC 或 A,C；也可以输入“sure B”“确定 B”“unsure AC”，明确告诉我把握度。",
+    "答题时只需输入 A、AC 或 A,C；无需自报把握度，私教会按题目负荷、作答节奏、改选和个人历史自动判断。",
     agentChatAvailable()
       ? `当前已选择 ${engineDisplayName()}：完成客观题后会生成个性化讲解；不在答题状态时也可以直接提问。`
       : "基础私教不调用模型，只执行确定性的学习指令；可从顶部选择本机 Agent。",
@@ -867,11 +835,6 @@ elements.input.addEventListener("input", () => {
     }
   }
 });
-for (const input of elements.confidenceField.querySelectorAll("input[name='confidence']")) {
-  input.addEventListener("click", () => {
-    confidenceTouched = true;
-  });
-}
 document.addEventListener("visibilitychange", () => {
   responseTimer.setVisible(document.visibilityState !== "hidden" && document.hasFocus());
 });

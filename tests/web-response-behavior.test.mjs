@@ -120,6 +120,26 @@ test("a short-question pace converges only after six matching personal observati
   assert.equal(established.pace_bucket, "fast");
   assert.ok(established.expected_duration_seconds < before.expected_duration_seconds);
 
+  const inferredBefore = assessResponseBehavior({
+    question,
+    observation: { ...observation, confidence_source: "inferred" },
+    declaredConfidence: "auto",
+    correct: true,
+    personalBaseline: fiveFast,
+  });
+  const inferredEstablished = assessResponseBehavior({
+    question,
+    observation: { ...observation, confidence_source: "inferred" },
+    declaredConfidence: "auto",
+    correct: true,
+    personalBaseline: sixFast,
+  });
+  assert.equal(inferredBefore.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
+  assert.equal(inferredBefore.effective_confidence, "unsure");
+  assert.equal(inferredEstablished.signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
+  assert.equal(inferredEstablished.effective_confidence, "sure");
+  assert.equal(inferredEstablished.reason_code, "clean_inferred_correct");
+
   for (const variant of [
     { correct: false, confidence: "sure", expected: RESPONSE_BEHAVIOR_SIGNALS.OVERCONFIDENT_WRONG },
     { correct: true, confidence: "guess", expected: RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS },
@@ -161,6 +181,61 @@ test("only a correct explicit sure answer with a clean steady rhythm is fluent",
   assert.equal(behavior.effective_confidence, "sure");
   assert.equal(objectiveResult({ correct: true, confidence: behavior.effective_confidence }), "mastered");
   assert.match(behavior.summary, /熟练倾向/u);
+});
+
+test("automatic evidence infers confidence conservatively from timing quality and reconsideration", () => {
+  const expected = estimateQuestionReadingSeconds(QUESTION);
+  const assess = ({ duration, first, changes = 0, quality = "clean", source = "live", correct = true }) =>
+    assessResponseBehavior({
+      question: QUESTION,
+      observation: {
+        ...live({ duration, first, changes, quality, confidenceSource: "inferred" }),
+        timing_source: source,
+        timing_quality: source === "restored" ? "resumed" : quality,
+      },
+      declaredConfidence: "auto",
+      correct,
+    });
+
+  const fluent = assess({ duration: expected, first: expected * 0.6 });
+  assert.equal(fluent.signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
+  assert.equal(fluent.reason_code, "clean_inferred_correct");
+  assert.equal(fluent.confidence_source, "inferred");
+  assert.equal(fluent.confidence_mode, "inferred");
+  assert.equal(Object.hasOwn(fluent, "declared_confidence"), false);
+  assert.equal(fluent.effective_confidence, "sure");
+  assert.equal(objectiveResult({ correct: true, confidence: fluent.effective_confidence }), "mastered");
+
+  const fast = assess({ duration: expected * 0.49, first: expected * 0.2 });
+  assert.equal(fast.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
+  assert.equal(fast.effective_confidence, "unsure");
+  assert.equal(objectiveResult({ correct: true, confidence: fast.effective_confidence }), "needs_retest");
+
+  const revised = assess({ duration: expected, first: expected * 0.5, changes: 2 });
+  assert.equal(revised.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
+  assert.equal(revised.effective_confidence, "unsure");
+
+  const deliberate = assess({ duration: expected * 2, first: expected * 1.85 });
+  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.STEADY);
+  assert.equal(deliberate.effective_confidence, "sure");
+  assert.equal(objectiveResult({ correct: true, confidence: deliberate.effective_confidence }), "mastered");
+
+  const restored = assess({
+    duration: expected,
+    first: expected * 0.5,
+    source: "restored",
+  });
+  assert.equal(restored.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
+  assert.equal(restored.effective_confidence, "unsure");
+
+  const fastWrong = assess({
+    duration: expected * 0.49,
+    first: expected * 0.2,
+    correct: false,
+  });
+  assert.equal(fastWrong.signal, RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS);
+  assert.equal(fastWrong.effective_confidence, "unsure");
+  assert.equal(objectiveResult({ correct: false, confidence: fastWrong.effective_confidence }), "not_mastered");
 });
 
 test("hesitation changes the review signal without rewriting trusted objective confidence", () => {

@@ -223,6 +223,66 @@ test("real browser harness path starts ignorant, issues, grades, and stores no l
   coach.close();
 });
 
+test("the Page answer shape infers stable evidence without asking the learner for confidence", async () => {
+  const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
+  const store = createMemoryCoachStore();
+  const coach = createBrowserCoach({
+    store,
+    worker: fixtureWorker(),
+    curriculum,
+    clock: () => "2026-08-10T08:00:00.000Z",
+    idFactory: idFactory(),
+  });
+  await coach.initialize();
+  const question = await coach.start();
+  const feedback = await coach.answer({
+    response: "B",
+    confidence: "auto",
+    behavior: {
+      schema_version: "web-response-observation.v1",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 12,
+      first_choice_seconds: 7,
+      answer_changes: 0,
+      confidence_source: "inferred",
+    },
+    expectedRevision: question.revision,
+    expectedItemId: question.question.item_id,
+  });
+  assert.equal(feedback.feedback.grade.result, "mastered");
+  assert.equal(feedback.feedback.behavior.signal, "fluent");
+  assert.equal(feedback.feedback.behavior.reason_code, "clean_inferred_correct");
+
+  const exported = await coach.exportData();
+  assert.deepEqual({
+    confidence: exported.attempts[0].confidence,
+    hasDeclared: Object.hasOwn(exported.attempts[0], "declared_confidence"),
+    source: exported.attempts[0].confidence_source,
+    signal: exported.attempts[0].behavior_signal,
+    reason: exported.attempts[0].behavior_reason_code,
+    result: exported.attempts[0].result,
+  }, {
+    confidence: "sure",
+    hasDeclared: false,
+    source: "inferred",
+    signal: "fluent",
+    reason: "clean_inferred_correct",
+    result: "mastered",
+  });
+  assert.equal(
+    exported.progress.topics[question.question.topic_id].mastery.recognition.latest_qualified,
+    true,
+  );
+  const restoredStore = createMemoryCoachStore();
+  const imported = await restoredStore.importData(exported);
+  assert.equal(imported.attempts[0].confidence_source, "inferred");
+  assert.equal(Object.hasOwn(imported.attempts[0], "declared_confidence"), false);
+  assert.equal(imported.progress.applied_attempt_ids.length, 1);
+  restoredStore.close();
+  coach.close();
+});
+
 test("a hesitant sure answer keeps the trusted grade but is excluded from stable evidence", async () => {
   const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
   const store = createMemoryCoachStore();
@@ -409,7 +469,7 @@ test("unqualified correct answers cannot raise stability accuracy or recover pas
   assert.equal(record.mastery, 0.75);
 });
 
-test("a clean qualified retest can recover a behavior regression", () => {
+test("an ambiguous correct answer preserves pass readiness, while a miss requires a clean retest", () => {
   let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
   for (let index = 0; index < 6; index += 1) {
     progress = applyObjectiveAttempt(progress, attempt({
@@ -434,6 +494,19 @@ test("a clean qualified retest can recover a behavior regression", () => {
     answer_changes: 2,
   }).progress;
   let record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.status, "pass_ready");
+  assert.equal(record.regression_active, false);
+  assert.equal(record.latest_qualified, false);
+  assert.equal(record.next_review_at, "2026-08-13");
+
+  progress = applyObjectiveAttempt(progress, attempt({
+    id: "wrong-regression",
+    item: "ready-item-0",
+    score: 0,
+    confidence: "unsure",
+    at: "2026-08-12T09:00:00.000Z",
+  })).progress;
+  record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
   assert.equal(record.status, "fragile");
   assert.equal(record.regression_active, true);
 
@@ -445,6 +518,39 @@ test("a clean qualified retest can recover a behavior regression", () => {
   record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
   assert.equal(record.status, "pass_ready");
   assert.equal(record.regression_active, false);
+});
+
+test("an inferred correct answer with one reconsideration is scheduled for next-day retest", () => {
+  let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  for (let index = 0; index < 6; index += 1) {
+    progress = applyObjectiveAttempt(progress, attempt({
+      id: `reconsider-ready-${index}`,
+      item: `reconsider-ready-item-${index}`,
+      at: `2026-08-${index < 3 ? "10" : "11"}T0${index}:00:00.000Z`,
+    })).progress;
+  }
+  progress = applyObjectiveAttempt(progress, {
+    ...attempt({
+      id: "inferred-one-reconsideration",
+      item: "reconsider-ready-item-0",
+      confidence: "unsure",
+      at: "2026-08-12T08:00:00.000Z",
+    }),
+    confidence_source: "inferred",
+    behavior_signal: "steady",
+    behavior_reason_code: "steady_single_observation",
+    pace_bucket: "expected",
+    timing_source: "live",
+    timing_quality: "clean",
+    duration_seconds: 14,
+    first_choice_seconds: 7,
+    answer_changes: 1,
+  }).progress;
+  const record = progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.status, "pass_ready");
+  assert.equal(record.latest_qualified, false);
+  assert.equal(record.regression_active, false);
+  assert.equal(record.next_review_at, "2026-08-13");
 });
 
 test("store reads and exports replay attempts instead of trusting stale derived progress", async () => {

@@ -37,7 +37,7 @@ export const WEB_HARNESS_STATES = Object.freeze({
   ERROR: "error",
 });
 
-const CONFIDENCE = new Set(["guess", "unsure", "sure"]);
+const CONFIDENCE = new Set(["guess", "unsure", "sure", "auto"]);
 const AGENT_ENGINE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const MAX_AGENT_TEXT = 2_000;
 const FORBIDDEN_PUBLIC_KEYS = new Set([
@@ -160,7 +160,7 @@ function normalizeSubmission(value, options) {
     settings = value;
   }
   const confidence = settings.confidence || "unsure";
-  if (!CONFIDENCE.has(confidence)) throw coachError("INVALID_CONFIDENCE", "把握度必须是 guess、unsure 或 sure。");
+  if (!CONFIDENCE.has(confidence)) throw coachError("INVALID_CONFIDENCE", "把握度模式必须是 auto、guess、unsure 或 sure。");
   if (
     !(typeof response === "string" && response.trim()) &&
     !(Array.isArray(response) && response.length > 0 && response.every((item) => typeof item === "string" && item.trim()))
@@ -444,7 +444,9 @@ export class BrowserCoachHarness {
         score: grade.correct ? 1 : 0,
         max_score: 1,
         confidence: behavior.effective_confidence,
-        declared_confidence: behavior.declared_confidence,
+        ...(Object.hasOwn(behavior, "declared_confidence")
+          ? { declared_confidence: behavior.declared_confidence }
+          : {}),
         confidence_source: behavior.confidence_source,
         behavior_signal: behavior.signal,
         behavior_reason_code: behavior.reason_code,
@@ -477,7 +479,10 @@ export class BrowserCoachHarness {
             pace_bucket: behavior.pace_bucket,
             timing_source: behavior.timing_source,
             timing_quality: behavior.timing_quality,
-            declared_confidence: behavior.declared_confidence,
+            confidence_mode: behavior.confidence_mode,
+            ...(Object.hasOwn(behavior, "declared_confidence")
+              ? { declared_confidence: behavior.declared_confidence }
+              : {}),
             confidence_source: behavior.confidence_source,
             effective_confidence: behavior.effective_confidence,
             duration_seconds: behavior.duration_seconds,
@@ -500,10 +505,10 @@ export class BrowserCoachHarness {
         .includes(behavior.signal);
       this.message = grade.result === "mastered"
         ? (behaviorRisk
-          ? "这题答对且自报确定；行为信号仍建议复测，本次不计入稳定掌握证据。"
-          : "这题答对且把握明确，记为 mastered；答题用时只作为辅助行为证据。")
+          ? "这题答对，但行为信号仍建议复测，本次不计入稳定掌握证据。"
+          : "这题答对，且自动行为证据达到稳定标准，记为 mastered。")
         : (grade.result === "needs_retest"
-          ? "答案正确但把握不足，记为 needs_retest，稍后再测。"
+          ? "答案正确，但本次行为证据不足，记为 needs_retest，稍后再测。"
           : "这题尚未掌握，已进入优先复习队列。");
       const committedView = this.#emit();
       if (!this.#agentEnabled()) return committedView;

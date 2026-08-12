@@ -115,10 +115,11 @@ function feedbackCopy(feedback) {
   const result = asText(grade.result ?? grade.status).toLowerCase();
   const correct = grade.correct === true || result === "correct" || result === "mastered";
   const needsRetest = result.includes("retest") || result.includes("guess");
-  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(feedback?.behavior?.signal);
+  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong", "insufficient_signal"]
+    .includes(feedback?.behavior?.signal);
 
   let verdict = "这题已经完成批注。";
-  if (correct && needsRetest) verdict = "答案对了，但这次把握不足：先记为“需要复测”。";
+  if (correct && needsRetest) verdict = "答案对了，但这次行为证据不足：先记为“需要复测”。";
   else if (correct && behaviorRisk) verdict = "答案对了；但这次行为信号仍建议复测，暂不计为稳定掌握证据。";
   else if (correct) verdict = "答对了，而且证据足够：这部分可以暂记为已掌握。";
   else if (grade.correct === false || result.includes("wrong") || result.includes("not_mastered")) {
@@ -138,7 +139,6 @@ export function createChatView({
   optionPanel,
   input,
   submitButton,
-  confidenceField,
   sessionLabel,
   sessionDot,
   taskList,
@@ -227,7 +227,6 @@ export function createChatView({
 
   function setComposer({ enabled = true, answering = false, busy = false } = {}) {
     input.disabled = !enabled || busy;
-    confidenceField.disabled = !enabled || !answering || busy;
     submitButton.disabled = !enabled || busy;
     submitButton.textContent = answering ? "交卷" : "发送";
     input.placeholder = answering
@@ -352,7 +351,7 @@ export function createChatView({
       setComposer({ enabled: true, busy: true });
     } else if (state === "awaiting_answer" && view.question) {
       appendMessage("coach", {
-        paragraphs: [asText(view.message, "先看题。按真实把握作答，猜对也会安排复测。")],
+        paragraphs: [asText(view.message, "先看题，直接选答案。私教会根据作答过程自动判断证据强度。")],
         question: view.question,
       });
       renderOptions(view.question);
