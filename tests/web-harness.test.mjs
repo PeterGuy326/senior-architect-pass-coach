@@ -263,6 +263,8 @@ test("a hesitant sure answer keeps the trusted grade but is excluded from stable
     declared: exported.attempts[0].declared_confidence,
     confidenceSource: exported.attempts[0].confidence_source,
     signal: exported.attempts[0].behavior_signal,
+    reasonCode: exported.attempts[0].behavior_reason_code,
+    paceBucket: exported.attempts[0].pace_bucket,
     duration: exported.attempts[0].duration_seconds,
     changes: exported.attempts[0].answer_changes,
   }, {
@@ -270,6 +272,8 @@ test("a hesitant sure answer keeps the trusted grade but is excluded from stable
     declared: "sure",
     confidenceSource: "explicit",
     signal: "hesitant",
+    reasonCode: "revision_heavy",
+    paceBucket: "extended",
     duration: 180,
     changes: 2,
   });
@@ -281,6 +285,39 @@ test("a hesitant sure answer keeps the trusted grade but is excluded from stable
     assert.equal(JSON.stringify(exported).includes(forbidden), false, forbidden);
   }
   coach.close();
+});
+
+test("personal response baseline is a bounded aggregate and rapid correctness does not auto-upgrade mastery", () => {
+  let progress = createBlankProgress({ now: "2026-08-10T08:00:00.000Z" });
+  for (let index = 0; index < 70; index += 1) {
+    progress = applyObjectiveAttempt(progress, {
+      ...attempt({
+        id: `fast-baseline-${index}`,
+        item: `fast-baseline-item-${index}`,
+        at: `2026-08-${index < 35 ? "10" : "11"}T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+      }),
+      declared_confidence: "sure",
+      confidence_source: "explicit",
+      behavior_signal: "insufficient_signal",
+      behavior_reason_code: "fast_correct_ambiguous",
+      pace_bucket: "fast",
+      timing_source: "live",
+      timing_quality: "clean",
+      duration_seconds: 6,
+      first_choice_seconds: 3,
+      answer_changes: 0,
+    }).progress;
+  }
+  const baseline = progress.response_behavior_baseline;
+  assert.equal(baseline.schema_version, "web-response-baseline.v1");
+  assert.ok(baseline.eligible_count >= 6 && baseline.eligible_count <= 48);
+  assert.equal(
+    Object.values(baseline.pace_bucket_counts).reduce((sum, count) => sum + count, 0),
+    baseline.eligible_count,
+  );
+  assert.deepEqual(Object.keys(baseline).sort(), ["eligible_count", "pace_bucket_counts", "schema_version"]);
+  assert.equal(progress.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition.qualified_evidence.length, 0);
+  assert.notEqual(progress.topics["K08.SOFTWARE_PROCESS_MODELS"].status, "pass_ready");
 });
 
 test("unsure, guessed, and legacy unsure answers never become qualified pass evidence", () => {
@@ -440,6 +477,38 @@ test("store reads and exports replay attempts instead of trusting stale derived 
   store.close();
 });
 
+test("attempt replay orders equivalent ISO offsets by their real instant", async () => {
+  const store = createMemoryCoachStore();
+  store.progress = createBlankProgress({ now: "2026-08-10T00:00:00.000Z" });
+  const attempts = [];
+  for (let index = 0; index < 6; index += 1) {
+    attempts.push(attempt({
+      id: `offset-ready-${index}`,
+      item: `offset-ready-item-${index}`,
+      at: `2026-08-${index < 3 ? "10" : "11"}T0${index}:00:00.000Z`,
+    }));
+  }
+  attempts.push(attempt({
+    id: "offset-earlier-correct",
+    item: "offset-ready-item-0",
+    at: "2026-08-12T10:30:00+02:00",
+  }));
+  attempts.push(attempt({
+    id: "offset-later-wrong",
+    item: "offset-ready-item-0",
+    score: 0,
+    at: "2026-08-12T09:00:00Z",
+  }));
+  store.attempts = new Map(attempts.map((value) => [value.attempt_id, value]));
+
+  const replayed = await store.getProgress();
+  const record = replayed.topics["K08.SOFTWARE_PROCESS_MODELS"].mastery.recognition;
+  assert.equal(record.last_attempt_at, "2026-08-12T09:00:00Z");
+  assert.equal(record.regression_active, true);
+  assert.equal(record.status, "fragile");
+  store.close();
+});
+
 test("invalid behavior metadata is rejected before the answer state is occupied", async () => {
   const curriculum = JSON.parse(await readFile(curriculumUrl, "utf8"));
   const store = createMemoryCoachStore();
@@ -466,7 +535,7 @@ test("invalid behavior metadata is rejected before the answer state is occupied"
   coach.close();
 });
 
-test("attempt replay is exact, changed time conflicts, and revision CAS admits one publisher", async () => {
+test("attempt replay is exact, changed timing or pace conflicts, and revision CAS admits one publisher", async () => {
   const store = createMemoryCoachStore();
   const now = "2026-08-10T08:00:00.000Z";
   await store.initialize({
@@ -485,7 +554,19 @@ test("attempt replay is exact, changed time conflicts, and revision CAS admits o
     created_at: now,
     updated_at: now,
   });
-  const evidence = attempt({ id: "attempt-cas", item: "item-cas", at: now });
+  const evidence = {
+    ...attempt({ id: "attempt-cas", item: "item-cas", at: now }),
+    declared_confidence: "sure",
+    confidence_source: "explicit",
+    behavior_signal: "fluent",
+    behavior_reason_code: "clean_confident_correct",
+    pace_bucket: "expected",
+    timing_source: "live",
+    timing_quality: "clean",
+    duration_seconds: 20,
+    first_choice_seconds: 10,
+    answer_changes: 0,
+  };
   const committed = await store.commitAttempt({
     expectedRevision: session.revision,
     sessionId: session.session_id,
@@ -507,6 +588,16 @@ test("attempt replay is exact, changed time conflicts, and revision CAS admits o
       sessionId: session.session_id,
       expectedItemId: "item-cas",
       attempt: { ...evidence, at: "2026-08-10T08:00:01.000Z" },
+      feedback: { item_id: "item-cas", result: "mastered", correct: true, source_refs: [] },
+    }),
+    { code: "ATTEMPT_CONFLICT" },
+  );
+  await assert.rejects(
+    store.commitAttempt({
+      expectedRevision: session.revision,
+      sessionId: session.session_id,
+      expectedItemId: "item-cas",
+      attempt: { ...evidence, pace_bucket: "fast", behavior_reason_code: "fast_correct_ambiguous" },
       feedback: { item_id: "item-cas", result: "mastered", correct: true, source_refs: [] },
     }),
     { code: "ATTEMPT_CONFLICT" },

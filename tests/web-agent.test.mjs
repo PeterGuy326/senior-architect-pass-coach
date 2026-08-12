@@ -7,12 +7,43 @@ import { createBrowserCoach } from "../docs/src/harness.mjs";
 import {
   DEFAULT_RUNTIME_ORIGIN,
   LOOPBACK_PROTOCOL,
+  RUNTIME_LAUNCH_URL,
   createLocalAgentClient,
   isLocalAgentRuntimeOrigin,
 } from "../docs/src/local-agent-client.mjs";
 import { objectiveResult } from "../docs/src/progress-rules.mjs";
 
 const curriculumUrl = new URL("../docs/data/curriculum.json", import.meta.url);
+const TEST_WORKSPACE = Object.freeze({
+  schema_version: "coach-local-workspace.v1",
+  state: "ready",
+  employee: Object.freeze({
+    name: "senior-architect-pass-coach",
+    version: "0.3.0",
+    digest: `sha256:${"a".repeat(64)}`,
+  }),
+  memory_owner: "browser_harness",
+  agent_role: "replaceable_brain",
+});
+
+function catalogResponse(adapters = [], overrides = {}) {
+  return {
+    schema_version: "coach-agent-catalog.v1",
+    protocol: LOOPBACK_PROTOCOL,
+    workspace: TEST_WORKSPACE,
+    adapters,
+    ...overrides,
+  };
+}
+
+function healthResponse(instanceId) {
+  return {
+    protocol: LOOPBACK_PROTOCOL,
+    status: "ready",
+    workspace_status: "ready",
+    instance_id: instanceId,
+  };
+}
 
 function idFactory() {
   let count = 0;
@@ -107,9 +138,22 @@ function jsonResponse(value, status = 200) {
 function pairingWindow() {
   const listeners = new Set();
   const opened = [];
+  const navigated = [];
   const popup = {
     closed: false,
     close() { this.closed = true; },
+    location: {
+      href: "about:blank",
+      replace(url) {
+        this.href = url;
+        navigated.push(url);
+      },
+    },
+    document: {
+      title: "",
+      documentElement: { lang: "" },
+      body: { textContent: "" },
+    },
   };
   const windowRef = {
     addEventListener(type, listener) {
@@ -128,12 +172,21 @@ function pairingWindow() {
   return {
     listeners,
     opened,
+    navigated,
     popup,
     windowRef,
     dispatch(data, { origin = DEFAULT_RUNTIME_ORIGIN, source = popup } = {}) {
       for (const listener of [...listeners]) listener({ data, origin, source });
     },
   };
+}
+
+async function waitFor(predicate, attempts = 100) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("condition_not_reached");
 }
 
 test("only an exact 127.0.0.1 HTTP origin is eligible for the Agent Runtime", () => {
@@ -158,7 +211,7 @@ test("the client binds browser-native fetch to the global receiver", async () =>
     if (url.endsWith("/v1/bootstrap")) {
       return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "a".repeat(43), instance_id: "receiver-test" });
     }
-    return jsonResponse({ protocol: LOOPBACK_PROTOCOL, adapters: [] });
+    return jsonResponse(catalogResponse());
   };
   const client = createLocalAgentClient({
     origin: "http://127.0.0.1:4317",
@@ -168,6 +221,59 @@ test("the client binds browser-native fetch to the global receiver", async () =>
   assert.deepEqual(receivers, [globalThis, globalThis]);
 });
 
+test("a v3 Runtime catalog without the immutable employee workspace fails closed", async () => {
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "a".repeat(43), instance_id: "old-runtime" });
+      }
+      return jsonResponse({
+        schema_version: "coach-agent-catalog.v1",
+        protocol: LOOPBACK_PROTOCOL,
+        adapters: [],
+      });
+    },
+  });
+  await assert.rejects(client.connect(), { code: "RUNTIME_UPDATE_REQUIRED" });
+  assert.equal(client.connected, false);
+});
+
+test("workspace binding rejects wrong identity, digest type, extra path data, and old protocol", async (t) => {
+  const cases = [
+    ["wrong employee", { ...TEST_WORKSPACE, employee: { ...TEST_WORKSPACE.employee, name: "different-employee" } }, LOOPBACK_PROTOCOL, "RUNTIME_UPDATE_REQUIRED"],
+    ["bad digest type", { ...TEST_WORKSPACE, employee: { ...TEST_WORKSPACE.employee, digest: 42 } }, LOOPBACK_PROTOCOL, "RUNTIME_UPDATE_REQUIRED"],
+    ["path field", { ...TEST_WORKSPACE, directory: "/Users/example/private" }, LOOPBACK_PROTOCOL, "INVALID_WORKSPACE_BINDING"],
+    ["old protocol", TEST_WORKSPACE, "coach-loopback.v2", "PROTOCOL_MISMATCH"],
+  ];
+  for (const [name, workspace, protocol, code] of cases) {
+    await t.test(name, async () => {
+      const client = createLocalAgentClient({
+        origin: "http://127.0.0.1:4317",
+        fetchImpl: async (url) => {
+          if (url.endsWith("/v1/bootstrap")) {
+            return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "a".repeat(43), instance_id: "strict-runtime" });
+          }
+          return jsonResponse(catalogResponse([], { protocol, workspace }));
+        },
+      });
+      await assert.rejects(client.connect(), { code });
+      assert.equal(client.connected, false);
+    });
+  }
+});
+
+test("health probing rejects an older Runtime that has no prepared employee workspace", async () => {
+  const client = createLocalAgentClient({
+    fetchImpl: async () => jsonResponse({
+      protocol: LOOPBACK_PROTOCOL,
+      status: "ready",
+      instance_id: "runtime-without-workspace",
+    }),
+  });
+  await assert.rejects(client.probe(), { code: "RUNTIME_IDENTITY_MISMATCH" });
+});
+
 test("public-page pairing makes no Runtime fetch until an exact popup grant is accepted", async () => {
   const token = "p".repeat(43);
   const calls = [];
@@ -175,10 +281,9 @@ test("public-page pairing makes no Runtime fetch until an exact popup grant is a
   const client = createLocalAgentClient({
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
-      return jsonResponse({
-        protocol: LOOPBACK_PROTOCOL,
-        adapters: [{ id: "claude-code", label: "Claude Code", state: "ready", selectable: true }],
-      });
+      return jsonResponse(catalogResponse([
+        { id: "claude-code", label: "Claude Code", state: "ready", selectable: true },
+      ]));
     },
     idFactory: () => "pairing-state-1234567890-abcdefgh",
   });
@@ -216,11 +321,152 @@ test("public-page pairing makes no Runtime fetch until an exact popup grant is a
   assert.equal(Object.hasOwn(calls[0].options, "targetAddressSpace"), false);
   assert.equal(connected.connected, true);
   assert.equal(connected.instance_id, "paired-runtime");
+  assert.deepEqual(connected.workspace, TEST_WORKSPACE);
   assert.equal(connected.adapters[0].id, "claude-code");
   assert.equal(Object.hasOwn(connected, "access_token"), false);
   assert.equal(Object.hasOwn(connected, "token"), false);
   assert.equal(browser.listeners.size, 0);
   assert.equal(browser.popup.closed, true);
+});
+
+test("a running Runtime is probed and paired without invoking the launch scheme", async () => {
+  const browser = pairingWindow();
+  const token = "r".repeat(43);
+  const calls = [];
+  const stages = [];
+  const client = createLocalAgentClient({
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/v1/health")) {
+        return jsonResponse(healthResponse("running-runtime"));
+      }
+      return jsonResponse(catalogResponse([
+        { id: "codex", label: "Codex CLI", state: "consent_required", selectable: false },
+      ]));
+    },
+    idFactory: () => "wake-running-state-1234567890-abcdef",
+  });
+
+  const pending = client.wakeAndPair({ windowRef: browser.windowRef, onStage: (stage) => stages.push(stage) });
+  await waitFor(() => browser.navigated.some((url) => url.startsWith(`${DEFAULT_RUNTIME_ORIGIN}/pair.html?`)));
+  assert.equal(browser.opened.length, 1);
+  assert.equal(browser.opened[0].url, "about:blank");
+  assert.equal(browser.navigated.includes(RUNTIME_LAUNCH_URL), false);
+  const pairUrl = new URL(browser.navigated.at(-1));
+  browser.dispatch({
+    type: "coach.runtime.grant",
+    protocol: LOOPBACK_PROTOCOL,
+    state: pairUrl.searchParams.get("state"),
+    access_token: token,
+    instance_id: "running-runtime",
+  });
+  const connected = await pending;
+  assert.equal(connected.connected, true);
+  assert.deepEqual(stages, ["checking", "pairing"]);
+  assert.equal(calls[0].url, `${DEFAULT_RUNTIME_ORIGIN}/v1/health`);
+  assert.equal(calls[0].options.headers.Authorization, undefined);
+  assert.equal(calls[0].options.headers["X-Coach-Protocol"], undefined);
+  assert.equal(calls[0].options.credentials, "omit");
+  assert.equal(calls[1].url, `${DEFAULT_RUNTIME_ORIGIN}/v1/adapters`);
+});
+
+test("an installed Runtime is launched by a fixed data-free scheme and paired only after health is ready", async () => {
+  const browser = pairingWindow();
+  const stages = [];
+  let healthCalls = 0;
+  const client = createLocalAgentClient({
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/health")) {
+        healthCalls += 1;
+        if (healthCalls === 1) throw new TypeError("connection refused");
+        return jsonResponse(healthResponse("launched-runtime"));
+      }
+      return jsonResponse(catalogResponse());
+    },
+    idFactory: () => "wake-launched-state-1234567890-abcde",
+  });
+
+  const pending = client.wakeAndPair({
+    windowRef: browser.windowRef,
+    onStage: (stage) => stages.push(stage),
+    pollIntervalMs: 10,
+    startupTimeoutMs: 500,
+  });
+  await waitFor(() => browser.navigated.some((url) => url.startsWith(`${DEFAULT_RUNTIME_ORIGIN}/pair.html?`)));
+  assert.equal(browser.navigated[0], RUNTIME_LAUNCH_URL);
+  assert.equal(new URL(browser.navigated[0]).search, "");
+  assert.equal(new URL(browser.navigated[0]).hash, "");
+  const pairUrl = new URL(browser.navigated.at(-1));
+  browser.dispatch({
+    type: "coach.runtime.grant",
+    protocol: LOOPBACK_PROTOCOL,
+    state: pairUrl.searchParams.get("state"),
+    access_token: "l".repeat(43),
+    instance_id: "launched-runtime",
+  });
+  await pending;
+  assert.deepEqual(stages, ["checking", "launching", "waiting", "pairing"]);
+});
+
+test("a missing Runtime fails on the Page without opening a dead loopback error page", async () => {
+  const browser = pairingWindow();
+  const client = createLocalAgentClient({
+    fetchImpl: async () => { throw new TypeError("connection refused"); },
+    idFactory: () => "wake-missing-state-1234567890-abcdef",
+  });
+  await assert.rejects(client.wakeAndPair({
+    windowRef: browser.windowRef,
+    initialProbeTimeoutMs: 50,
+    pollIntervalMs: 10,
+    startupTimeoutMs: 100,
+  }), (error) => {
+    assert.equal(error.code, "RUNTIME_START_TIMEOUT");
+    assert.match(error.message, /未能启动.*安装最新 Runtime/u);
+    return true;
+  });
+  assert.deepEqual(browser.navigated, [RUNTIME_LAUNCH_URL]);
+  assert.equal(browser.navigated.some((url) => url.startsWith(DEFAULT_RUNTIME_ORIGIN)), false);
+  assert.equal(browser.popup.closed, true);
+});
+
+test("a different service on the Runtime port is diagnosed and never receives a pairing navigation", async () => {
+  const browser = pairingWindow();
+  const client = createLocalAgentClient({
+    fetchImpl: async () => jsonResponse({ status: "ready", instance_id: "not-the-runtime" }),
+  });
+  await assert.rejects(client.wakeAndPair({ windowRef: browser.windowRef }), {
+    code: "RUNTIME_IDENTITY_MISMATCH",
+  });
+  assert.deepEqual(browser.navigated, []);
+  assert.equal(browser.popup.closed, true);
+});
+
+test("pairing is pinned to the Runtime instance observed by the health probe", async () => {
+  const browser = pairingWindow();
+  let adapterCalls = 0;
+  const client = createLocalAgentClient({
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/health")) {
+        return jsonResponse(healthResponse("health-runtime"));
+      }
+      adapterCalls += 1;
+      return jsonResponse(catalogResponse());
+    },
+    idFactory: () => "wake-instance-state-1234567890-abcde",
+  });
+  const pending = client.wakeAndPair({ windowRef: browser.windowRef });
+  await waitFor(() => browser.navigated.some((url) => url.startsWith(`${DEFAULT_RUNTIME_ORIGIN}/pair.html?`)));
+  const pairUrl = new URL(browser.navigated.at(-1));
+  browser.dispatch({
+    type: "coach.runtime.grant",
+    protocol: LOOPBACK_PROTOCOL,
+    state: pairUrl.searchParams.get("state"),
+    access_token: "i".repeat(43),
+    instance_id: "replacement-runtime",
+  });
+  await assert.rejects(pending, { code: "PAIRING_RESPONSE_INVALID" });
+  assert.equal(adapterCalls, 0);
+  assert.equal(client.connected, false);
 });
 
 test("pairing rejects a same-popup grant with a wrong state, protocol, type or token", async (t) => {
@@ -237,7 +483,7 @@ test("pairing rejects a same-popup grant with a wrong state, protocol, type or t
       const client = createLocalAgentClient({
         fetchImpl: async (...args) => {
           calls.push(args);
-          return jsonResponse({ protocol: LOOPBACK_PROTOCOL, adapters: [] });
+          return jsonResponse(catalogResponse());
         },
         idFactory: () => "strict-pair-state-1234567890-abcdef",
       });
@@ -271,10 +517,9 @@ test("Runtime bearer stays inside client memory and is absent from URLs, bodies,
       return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "fixture-runtime" });
     }
     if (url.endsWith("/v1/adapters")) {
-      return jsonResponse({
-        protocol: LOOPBACK_PROTOCOL,
-        adapters: [{ id: "qwen-code", label: "Qwen Code", state: "ready", selectable: true, reason_codes: [] }],
-      });
+      return jsonResponse(catalogResponse([
+        { id: "qwen-code", label: "Qwen Code", state: "ready", selectable: true, reason_codes: [] },
+      ]));
     }
     return jsonResponse({ protocol: LOOPBACK_PROTOCOL, engine: "qwen-code", coaching_text: "专项补强建议。" });
   };
@@ -342,9 +587,7 @@ test("Codex personal consent is explicit, memory-only, and returns an experiment
         return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "codex-runtime" });
       }
       if (url.endsWith("/v1/adapters")) {
-        return jsonResponse({
-          protocol: LOOPBACK_PROTOCOL,
-          adapters: [{
+        return jsonResponse(catalogResponse([{
             id: "codex",
             label: "Codex CLI",
             state: "consent_required",
@@ -352,8 +595,7 @@ test("Codex personal consent is explicit, memory-only, and returns an experiment
             reason_codes: ["codex_personal_consent_required"],
             execution_mode: "personal_experimental",
             framework_adapter_status: "probe_only",
-          }],
-        });
+          }]));
       }
       return jsonResponse({
         protocol: LOOPBACK_PROTOCOL,
@@ -399,10 +641,9 @@ test("Runtime failures expose only a stable reason code and local message, never
         return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "a".repeat(43) });
       }
       if (url.endsWith("/v1/adapters")) {
-        return jsonResponse({
-          protocol: LOOPBACK_PROTOCOL,
-          adapters: [{ id: "qwen-code", label: "Qwen Code", state: "ready", selectable: true }],
-        });
+        return jsonResponse(catalogResponse([
+          { id: "qwen-code", label: "Qwen Code", state: "ready", selectable: true },
+        ]));
       }
       return jsonResponse({
         reason_code: "agent_run_failed",
@@ -498,8 +739,15 @@ test("trusted grade and atomic progress commit happen before Agent coaching", as
   assert.equal(serialized.includes("private/path"), false);
   assert.equal(agentPayload.deidentifiedProgress.schema_version, "deidentified-progress.v1");
   assert.equal(agentPayload.trustedGrade.reference_answer, "B");
-  assert.equal(agentPayload.deidentifiedProgress.recommendations[0].reason_code, "answer_fluent");
-  for (const forbidden of ["duration_seconds", "first_choice_seconds", "answer_changes", "confidence_source"]) {
+  assert.equal(agentPayload.deidentifiedProgress.recommendations[0].reason_code, "clean_confident_correct");
+  for (const forbidden of [
+    "duration_seconds",
+    "first_choice_seconds",
+    "answer_changes",
+    "confidence_source",
+    "pace_bucket",
+    "response_behavior_baseline",
+  ]) {
     assert.equal(JSON.stringify(agentPayload).includes(forbidden), false, forbidden);
   }
   assert.equal(JSON.stringify(await coach.exportData()).includes("只针对薄弱点再练一题"), false);

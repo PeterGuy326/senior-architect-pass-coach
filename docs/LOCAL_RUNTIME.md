@@ -6,9 +6,10 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 
 1. 从 [GitHub Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 解压并打开 `Senior Architect Pass Coach.app`；Linux x64（glibc 2.28+，不适用于 Alpine/musl）解压并运行 `start-local-coach`。
-3. Runtime 只在 `http://127.0.0.1:43127` 启动配对桥，并打开正式 Pages。若浏览器没有自动打开，可手动打开上面的 Pages 链接。
-4. 在 Pages 点击“连接本机 Agent”。新窗口会显示 Runtime 自己的确认页；点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络。
-5. 回到同一个 Pages 页面，从 Runtime 实际检查为“可用”的 Agent 中选择一个。Codex 会先显示“需要本人同意”，确认复用本机 Codex / ChatGPT 登录后才可选。答题仍由固定答案键批改；提交后才会追加 Agent 的个性化讲解，也可以继续追问。
+3. macOS 首次解压后打开一次 `.app`，让系统登记 `senior-architect-pass-coach://` 启动入口。它是固定、无参数的 launch-only 信号；应用启动器忽略系统传入的全部参数，网页不会在这里放令牌、配对 state、命令、URL 或文件路径。Runtime 仍只监听 `http://127.0.0.1:43127`。
+4. 在 Pages 点击“连接本机 Agent”。网页先在这次用户点击内探测固定健康端点：已经运行就直接配对；macOS 没有运行时才用上面的固定入口唤起应用并短暂等待，Linux 必须先手工运行 `start-local-coach`。只有健康响应同时匹配协议、状态和实例标识后，等待窗口才会进入 Runtime 自己的确认页。点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络。
+5. Runtime 先用 Digital Employee 密封一份只读员工工作区，并将员工名、版本和 digest 返回给 Page；Schema 校验、兼容性探测和执行都绑定到该工作区。
+6. 回到同一个 Pages 页面，从 Runtime 实际检查为“可用”的 Agent 中选择一个作为私教“大脑”。Codex 会先显示“需要本人同意”，确认复用本机 Codex / ChatGPT 登录后才可选。答题仍由固定答案键批改；提交后才会追加 Agent 的个性化讲解，也可以继续追问。
 
 不需要 clone 仓库、安装 npm 包或编译源码。当前 macOS 包是未 notarize 的开源预览版；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。首次启动可先在 Finder 中右键应用并选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。
 
@@ -22,11 +23,15 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 
 ## 配对协议与记忆
 
-Pages 加载时不会探测本机端口。用户点击连接后，页面才打开固定的 `http://127.0.0.1:43127/pair.html`；这个由 Runtime 提供的页面要求用户再次确认，并通过同源 `/v1/bootstrap` 取得一个绑定到精确 Pages Origin 的短期 Bearer。授权消息只发回发起配对的窗口，接收方还会校验 popup 来源、窗口引用、随机 state、协议版本和 Runtime 实例。
+Pages 加载时不会探测本机端口。用户点击连接后，页面同步保留一个不含秘密的等待窗口，再探测固定 `/v1/health`。若 Runtime 未运行，macOS 等待窗口只导航到精确的 `senior-architect-pass-coach://launch`，随后轮询健康状态；Linux 没有注册该入口，需先运行 `start-local-coach`。若超时，会关闭等待窗口并在 Pages 内提示安装或启动，不会把用户送到拒绝连接的 `127.0.0.1` 错误页。若端口被其他服务占用或响应不符合 Runtime 协议，也会停止并明确诊断，不会继续配对。
+
+确认服务身份和就绪后，页面才把同一个窗口导航到固定的 `http://127.0.0.1:43127/pair.html`，并在此时生成随机配对 state。这个由 Runtime 提供的页面要求用户再次确认，并通过同源 `/v1/bootstrap` 取得一个绑定到精确 Pages Origin 的短期 Bearer。授权消息只发回发起配对的窗口，接收方还会校验 popup 来源、窗口引用、随机 state、协议版本和 Runtime 实例。
 
 明文 Bearer 在浏览器侧只短暂经过确认页的 JavaScript 对象，之后只留在 Pages 的 JavaScript 私有字段；Runtime 只保留其摘要与绑定 Origin。它不进入 URL、DOM、IndexedDB、`localStorage`、`sessionStorage`、导出文件或日志；刷新 Pages 或重启 Runtime 后需要重新配对。后续跨 Origin API 只允许精确的 `https://peterguy326.github.io`，不使用 wildcard CORS 或 cookie credentials。
 
 配对窗口不读取、不复制也不保存学习档案。切换 Agent 只改变讲解引擎，不会清空当前题目、session revision、attempt 或进度；这些数据始终留在 Pages Origin 的 IndexedDB，因此正常使用不需要在 Pages 与 Runtime 之间导出、导入或合并档案。导出仍只用于用户主动备份或换浏览器。
+
+Runtime 的工作区绑定格式为 `coach-local-workspace.v1`。它不把本机目录暴露给 Page，只返回固定员工身份、版本和 `sha256:` 摘要。旧 Runtime、错误员工、摘要格式不匹配或带路径的绑定都会被新版 Page 拒绝；重启 Runtime 会重新密封并重新配对。
 
 ## Agent 与凭证
 
@@ -65,4 +70,4 @@ Codex 个人实验模式不会复制或记录 `auth.json` 内容。每轮只在 
 npm run runtime -- --open
 ```
 
-默认端口为 `43127`。`--open` 只允许打开精确的正式 Pages URL，不能用来启动任意 URL 或 shell 命令。源码入口只用于开发；考生应使用 Release 中的自包含预览包。
+默认端口为 `43127`。`--open` 只允许打开精确的正式 Pages URL，不能用来启动任意 URL 或 shell 命令。macOS Release 应用注册的 custom scheme 也只有“启动”语义，启动脚本不会转发 deep link 或其他外部参数。源码入口只用于开发；考生应使用 Release 中的自包含预览包。

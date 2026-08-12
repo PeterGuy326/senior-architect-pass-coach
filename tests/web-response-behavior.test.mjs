@@ -6,6 +6,7 @@ import {
   assessResponseBehavior,
   calibrateResponseConfidence,
   createResponseTimer,
+  estimateQuestionDuration,
   estimateQuestionReadingSeconds,
   normalizeResponseObservation,
 } from "../docs/src/response-behavior.mjs";
@@ -39,7 +40,113 @@ test("response timing is normalized by bounded question reading load", () => {
   const long = estimateQuestionReadingSeconds({ prompt: "长".repeat(2_000), options: ["甲", "乙", "丙", "丁"] });
   assert.equal(short, 12);
   assert.ok(current >= short);
-  assert.equal(long, 45);
+  assert.equal(long, 90);
+
+  const shortOptions = estimateQuestionReadingSeconds({
+    prompt: "以下哪项正确？",
+    options: ["甲", "乙", "丙", "丁"],
+  });
+  const longOptions = estimateQuestionReadingSeconds({
+    prompt: "以下哪项正确？",
+    options: ["甲".repeat(80), "乙".repeat(80), "丙".repeat(80), "丁".repeat(80)],
+  });
+  const logicHeavy = estimateQuestionReadingSeconds({
+    prompt: "如果 A=1 且 B=2，以下哪项不正确？",
+    options: ["A→B", "B→A", "A=B", "A≠B"],
+  });
+  assert.ok(longOptions > shortOptions);
+  assert.ok(logicHeavy > shortOptions);
+});
+
+test("personal timing needs enough bounded evidence and only adjusts the question-normalized expectation", () => {
+  const question = {
+    prompt: "某业务系统需要在一致性、可用性、恢复时间和实现成本之间权衡，请选择最符合约束的架构战术。".repeat(2),
+    options: ["方案甲".repeat(12), "方案乙".repeat(12), "方案丙".repeat(12), "方案丁".repeat(12)],
+  };
+  const population = estimateQuestionDuration(question);
+  const insufficient = estimateQuestionDuration(question, {
+    personalBaseline: {
+      schema_version: "web-response-baseline.v1",
+      eligible_count: 5,
+      pace_bucket_counts: { very_fast: 0, fast: 5, expected: 0, deliberate: 0, extended: 0 },
+    },
+  });
+  const established = estimateQuestionDuration(question, {
+    personalBaseline: {
+      schema_version: "web-response-baseline.v1",
+      eligible_count: 6,
+      pace_bucket_counts: { very_fast: 0, fast: 6, expected: 0, deliberate: 0, extended: 0 },
+    },
+  });
+  assert.equal(insufficient.baseline_source, "population");
+  assert.equal(insufficient.expected_seconds, population.expected_seconds);
+  assert.equal(established.baseline_source, "personal");
+  assert.ok(established.expected_seconds < population.expected_seconds);
+  assert.equal(established.base_expected_seconds, population.base_expected_seconds);
+});
+
+test("a short-question pace converges only after six matching personal observations", () => {
+  const question = { prompt: "选择正确项", options: ["甲", "乙"] };
+  const fiveFast = {
+    schema_version: "web-response-baseline.v1",
+    eligible_count: 5,
+    pace_bucket_counts: { very_fast: 0, fast: 5, expected: 0, deliberate: 0, extended: 0 },
+  };
+  const sixFast = {
+    ...fiveFast,
+    eligible_count: 6,
+    pace_bucket_counts: { ...fiveFast.pace_bucket_counts, fast: 6 },
+  };
+  const observation = live({ duration: 6.4, first: 2.5, changes: 0 });
+  const before = assessResponseBehavior({
+    question,
+    observation,
+    declaredConfidence: "sure",
+    correct: true,
+    personalBaseline: fiveFast,
+  });
+  const established = assessResponseBehavior({
+    question,
+    observation,
+    declaredConfidence: "sure",
+    correct: true,
+    personalBaseline: sixFast,
+  });
+
+  assert.equal(before.signal, RESPONSE_BEHAVIOR_SIGNALS.INSUFFICIENT);
+  assert.equal(before.baseline_source, "population");
+  assert.equal(established.signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
+  assert.equal(established.baseline_source, "personal");
+  assert.equal(established.pace_bucket, "fast");
+  assert.ok(established.expected_duration_seconds < before.expected_duration_seconds);
+
+  for (const variant of [
+    { correct: false, confidence: "sure", expected: RESPONSE_BEHAVIOR_SIGNALS.OVERCONFIDENT_WRONG },
+    { correct: true, confidence: "guess", expected: RESPONSE_BEHAVIOR_SIGNALS.LIKELY_GUESS },
+    { correct: true, confidence: "unsure", expected: RESPONSE_BEHAVIOR_SIGNALS.HESITANT },
+  ]) {
+    assert.equal(assessResponseBehavior({
+      question,
+      observation,
+      declaredConfidence: variant.confidence,
+      correct: variant.correct,
+      personalBaseline: sixFast,
+    }).signal, variant.expected);
+  }
+  assert.notEqual(assessResponseBehavior({
+    question,
+    observation: { ...observation, timing_quality: "interrupted" },
+    declaredConfidence: "sure",
+    correct: true,
+    personalBaseline: sixFast,
+  }).signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
+  assert.notEqual(assessResponseBehavior({
+    question,
+    observation: live({ duration: 2, first: 1, changes: 0 }),
+    declaredConfidence: "sure",
+    correct: true,
+    personalBaseline: sixFast,
+  }).signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
 });
 
 test("only a correct explicit sure answer with a clean steady rhythm is fluent", () => {
@@ -77,6 +184,28 @@ test("hesitation changes the review signal without rewriting trusted objective c
   assert.equal(fastUnsure.effective_confidence, "unsure");
   assert.notEqual(fastUnsure.signal, RESPONSE_BEHAVIOR_SIGNALS.FLUENT);
   assert.equal(objectiveResult({ correct: true, confidence: fastUnsure.effective_confidence }), "needs_retest");
+});
+
+test("slow reading alone is deliberate, while revision and explicit confidence remain decisive", () => {
+  const expected = estimateQuestionReadingSeconds(QUESTION);
+  const deliberate = assessResponseBehavior({
+    question: QUESTION,
+    observation: live({ duration: expected * 2.1, first: expected * 1.9, changes: 0 }),
+    declaredConfidence: "sure",
+    correct: true,
+  });
+  assert.equal(deliberate.signal, RESPONSE_BEHAVIOR_SIGNALS.STEADY);
+  assert.equal(deliberate.reason_code, "deliberate_reading_only");
+  assert.match(deliberate.summary, /慢读本身不等于不会/u);
+
+  const revised = assessResponseBehavior({
+    question: QUESTION,
+    observation: live({ duration: expected, first: expected * 0.5, changes: 2 }),
+    declaredConfidence: "sure",
+    correct: true,
+  });
+  assert.equal(revised.signal, RESPONSE_BEHAVIOR_SIGNALS.HESITANT);
+  assert.equal(revised.reason_code, "revision_heavy");
 });
 
 test("guess, overconfidence, rapid correctness and restored timing remain distinct", () => {

@@ -10,7 +10,7 @@
 4. 员工包只读且只能提出进度事件。`service/` 必须先验证输出 Schema、动作、授权范围和本地可信证据，之后才可调用 `progress_engine` 写入。
 5. 只把白名单字段组成的去标识化快照交给员工包。不得传递用户 ID、姓名、邮箱、自由文本档案、本地路径或资源路径。
 6. 出题时，考生提交前不得展示答案或解析；提交后才能按员工包契约反馈。
-7. Digital Employee 版本必须精确锁定。Codex 当前只能探测，不能作为可运行 Adapter；`run` 未交付前不得伪装成已上线能力。
+7. Digital Employee 版本必须精确锁定。Codex 当前只能探测，不能作为框架可运行 Adapter；案例级个人实验 Runner 必须明确标记 `probe_only` / unqualified、取得当次内存同意且不得注册进 Host Registry。`run` 未交付前不得伪装成框架能力。
 
 ## 修改后的最低验证
 

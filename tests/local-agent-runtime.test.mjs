@@ -13,7 +13,12 @@ import {
   PUBLIC_COACH_URL,
 } from "../service/local-agent-runtime.mjs";
 import { openRuntimeUrl } from "../service/runtime-cli.mjs";
-import { LocalAgentClient } from "../docs/src/local-agent-client.mjs";
+import { createEmployeeSchemaValidators } from "../service/schema-validator.mjs";
+import { LocalAgentClient, RUNTIME_LAUNCH_URL } from "../docs/src/local-agent-client.mjs";
+import {
+  MAC_RUNTIME_URL_SCHEME,
+  createMacInfoPlist,
+} from "../scripts/package-local-runtime.mjs";
 
 const TOKEN = "a".repeat(43);
 const QUESTION = Object.freeze({
@@ -174,6 +179,7 @@ async function fixture(options = {}) {
     inspections: [],
     preflights: 0,
     runnerRegistries: [],
+    runnerDirectories: [],
     runs: [],
     codexPreflights: 0,
     codexRuns: [],
@@ -182,8 +188,9 @@ async function fixture(options = {}) {
     calls.inspections.push({ engine, packageDirectory, hostRegistry });
     return readyInspection();
   });
-  const runnerFactory = options.runnerFactory || (({ hostRegistry } = {}) => {
+  const runnerFactory = options.runnerFactory || (({ hostRegistry, directory: packageDirectory } = {}) => {
     calls.runnerRegistries.push(hostRegistry);
+    calls.runnerDirectories.push(packageDirectory);
     return {
       async preflight() { calls.preflights += 1; },
       async run(input) {
@@ -221,6 +228,8 @@ async function fixture(options = {}) {
     runnerFactory,
     codexPersonalProbe,
     codexPersonalRunnerFactory,
+    ...(options.workspaceFactory ? { workspaceFactory: options.workspaceFactory } : {}),
+    ...(options.schemaValidatorsFactory ? { schemaValidatorsFactory: options.schemaValidatorsFactory } : {}),
     tokenFactory: () => TOKEN,
     ...(options.hostRegistry ? { hostRegistry: options.hostRegistry } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
@@ -326,6 +335,7 @@ test("runtime binds IPv4 loopback, redirects its root to Pages, serves only pair
   assert.equal(health.body.status, "ready");
   assert.equal(health.body.authentication, "bootstrap_required");
   assert.equal(health.body.agent_run_busy, false);
+  assert.equal(health.body.workspace_status, "ready");
   assert.match(health.body.instance_id, /^[0-9a-f-]{36}$/u);
   assert.doesNotMatch(JSON.stringify(health.body), /tmp|token|employee|directory/iu);
 });
@@ -440,6 +450,11 @@ test("a loopback-confirmed pairing grant is bound to the exact public Pages orig
   assert.equal(publicAdapters.headers.get("access-control-allow-origin"), PUBLIC_COACH_ORIGIN);
   assert.equal(publicAdapters.headers.get("access-control-expose-headers"), "Idempotency-Replayed");
   assert.equal(publicAdapters.body.adapters.length, 6);
+  assert.equal(publicAdapters.body.schema_version, "coach-agent-catalog.v1");
+  assert.equal(publicAdapters.body.workspace.schema_version, "coach-local-workspace.v1");
+  assert.equal(publicAdapters.body.workspace.employee.name, "senior-architect-pass-coach");
+  assert.match(publicAdapters.body.workspace.employee.digest, /^sha256:[a-f0-9]{64}$/u);
+  assert.doesNotMatch(JSON.stringify(publicAdapters.body.workspace), /directory|path|Users|tmp/iu);
 
   const replayedFromLoopback = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
     headers: baseHeaders(environment.runtime),
@@ -678,22 +693,31 @@ test("Codex personal coaching cannot restate or contradict the trusted answer", 
   assert.doesNotMatch(JSON.stringify(response.body), /故障模式|A/u);
 });
 
-test("compatibility inspection and execution receive the same operator-owned host registry", async (t) => {
+test("compatibility inspection and execution receive the same registry and sealed employee workspace", async (t) => {
   const hostRegistry = { resolve() { return null; } };
   const inspectionRegistries = [];
   const runnerRegistries = [];
+  const inspectionDirectories = [];
+  const runnerDirectories = [];
+  const schemaDirectories = [];
   const environment = await fixture({
     hostRegistry,
-    inspectAdapter: async ({ hostRegistry: observedRegistry }) => {
+    inspectAdapter: async ({ hostRegistry: observedRegistry, directory }) => {
       inspectionRegistries.push(observedRegistry);
+      inspectionDirectories.push(directory);
       return readyInspection();
     },
-    runnerFactory: ({ hostRegistry: observedRegistry }) => {
+    runnerFactory: ({ hostRegistry: observedRegistry, directory }) => {
       runnerRegistries.push(observedRegistry);
+      runnerDirectories.push(directory);
       return {
         async preflight() {},
         async run() { return completedSubmitOutput(); },
       };
+    },
+    schemaValidatorsFactory: ({ directory }) => {
+      schemaDirectories.push(directory);
+      return createEmployeeSchemaValidators({ directory });
     },
   });
   t.after(() => environment.close());
@@ -712,6 +736,9 @@ test("compatibility inspection and execution receive the same operator-owned hos
   assert.ok(inspectionRegistries.length >= 1);
   assert.ok(inspectionRegistries.every((registry) => registry === hostRegistry));
   assert.deepEqual(runnerRegistries, [hostRegistry]);
+  assert.ok(inspectionDirectories.length >= 1);
+  assert.ok(inspectionDirectories.every((directory) => directory === runnerDirectories[0]));
+  assert.deepEqual(schemaDirectories, [runnerDirectories[0]]);
 });
 
 test("submit runs one schema-valid employee turn, sanitizes coaching, ignores events, and replays idempotently", async (t) => {
@@ -1114,6 +1141,8 @@ test("the real Web LocalAgentClient bootstraps with access_token and lists adapt
   assert.equal(connected.connected, true);
   assert.equal(connected.protocol, LOOPBACK_PROTOCOL);
   assert.equal(connected.instance_id, environment.runtime.instanceId);
+  assert.equal(connected.workspace.employee.name, "senior-architect-pass-coach");
+  assert.equal(connected.workspace.agent_role, "replaceable_brain");
   assert.equal(connected.adapters.length, 6);
   assert.equal(connected.adapters.find(({ id }) => id === "qwen-code").state, "ready");
   const coaching = await client.coach({
@@ -1146,4 +1175,15 @@ test("--open uses an argument array with shell disabled and only the exact publi
   assert.equal(openRuntimeUrl("https://example.com/", { spawnImpl: () => child }), false);
   assert.equal(openRuntimeUrl("http://127.0.0.1:43127/", { spawnImpl: () => child }), false);
   assert.equal(openRuntimeUrl("http://127.0.0.1:80/", { spawnImpl: () => child }), false);
+});
+
+test("the macOS bundle registers one launch-only URL scheme", () => {
+  const plist = createMacInfoPlist("0.6.0");
+  assert.equal(MAC_RUNTIME_URL_SCHEME, "senior-architect-pass-coach");
+  assert.equal(RUNTIME_LAUNCH_URL, `${MAC_RUNTIME_URL_SCHEME}://launch`);
+  assert.match(plist, /<key>CFBundleURLTypes<\/key>/u);
+  assert.match(plist, /<string>senior-architect-pass-coach<\/string>/u);
+  assert.match(plist, /io\.github\.peterguy326\.architect-pass-coach\.runtime-launch/u);
+  assert.doesNotMatch(plist, /architect-pass-coach:\/\//u);
+  assert.throws(() => createMacInfoPlist("0.5.0</string>"), /version_invalid/u);
 });

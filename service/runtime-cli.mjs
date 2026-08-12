@@ -79,6 +79,9 @@ export async function main(argumentsList = process.argv.slice(2)) {
   try {
     const started = await runtime.start();
     process.stdout.write(`本机 Agent 配对桥已启动：${started.url}\n`);
+    process.stdout.write(
+      `Digital Employee 工作区：${started.workspace.employee.name} ${started.workspace.employee.version} (${started.workspace.employee.digest.slice(0, 19)}…)\n`,
+    );
     process.stdout.write(`私教主入口：${PUBLIC_COACH_URL}\n`);
     process.stdout.write("学习档案仍保存在公开私教页面的浏览器存储；按 Ctrl+C 停止本机 Runtime。\n");
     if (values.open) openRuntimeUrl(PUBLIC_COACH_URL);

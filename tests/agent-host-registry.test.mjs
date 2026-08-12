@@ -34,7 +34,8 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.equal((catalogSource.match(/state:\s*"probe_only"/gu) || []).length, 2);
   assert.doesNotMatch(catalogSource, /state:\s*"ready"|等待连接本机|本机已安装/u);
   assert.match(source, /基础私教 · Runtime 已连接/u);
-  assert.match(source, /下方是本次对安装、凭据和员工契约的真实检测结果/u);
+  assert.match(source, /已构建并锁定 Digital Employee 工作区/u);
+  assert.match(source, /切换 Agent 只替换“大脑”/u);
   assert.match(source, /Codex CLI 个人实验模式/u);
   assert.match(source, /consentCodexPersonal/u);
   assert.match(source, /个人实验模式尚未通过 Digital Employee 工具白名单认证/u);

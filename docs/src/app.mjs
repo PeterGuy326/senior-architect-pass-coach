@@ -11,6 +11,12 @@ import {
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const ANSWER_LABELS = /^[A-H]+$/u;
 const BUSY_STATES = new Set(["loading", "generating_question", "evaluating"]);
+const RUNTIME_CONNECTION_STAGE_MESSAGES = Object.freeze({
+  checking: "正在检查已运行的本机 Runtime；此操作由你刚才的点击触发……",
+  launching: "尚未发现 Runtime，正在尝试唤起 macOS 应用；Linux 请先运行 start-local-coach……",
+  waiting: "正在等待本机 Runtime；确认服务就绪后才会进入 127.0.0.1 配对页……",
+  pairing: "Runtime 已就绪，正在打开本机确认页；授权令牌只留在当前页面内存……",
+});
 
 const elements = Object.freeze({
   timeline: document.querySelector("#chat-timeline"),
@@ -75,6 +81,7 @@ let initialized = false;
 let operating = false;
 let localAgentClient = null;
 let runtimeAdapters = [];
+let runtimeWorkspace = null;
 let selectedEngine = "content-only";
 let connectingRuntime = false;
 let restoringProfile = false;
@@ -316,17 +323,24 @@ async function connectRuntime() {
   let completionMessage = "";
   elements.runtimeConnect.disabled = true;
   elements.engineTrigger.disabled = true;
-  elements.engineDialogStatus.textContent = "正在与本机 Runtime 建立仅存内存的授权……";
+  elements.engineDialogStatus.textContent = "正在检测本机 Runtime；macOS 未启动时会尝试唤起应用，Linux 需先运行 start-local-coach……";
   try {
     const client = createLocalAgentClient({
       origin: LOOPBACK_RUNTIME_PAGE ? location.origin : DEFAULT_RUNTIME_ORIGIN,
     });
     const connection = LOOPBACK_RUNTIME_PAGE
       ? await client.connect()
-      : await client.pair({ windowRef: window });
+      : await client.wakeAndPair({
+          windowRef: window,
+          onStage(stage) {
+            elements.engineDialogStatus.textContent = RUNTIME_CONNECTION_STAGE_MESSAGES[stage]
+              || "正在连接本机 Runtime……";
+          },
+        });
     localAgentClient?.disconnect();
     localAgentClient = client;
     runtimeAdapters = connection.adapters;
+    runtimeWorkspace = connection.workspace;
     const coach = await getCoach();
     coach.setAgentClient(client);
     selectedEngine = "content-only";
@@ -336,6 +350,7 @@ async function connectRuntime() {
     localAgentClient?.disconnect();
     localAgentClient = null;
     runtimeAdapters = [];
+    runtimeWorkspace = null;
     selectedEngine = "content-only";
     completionMessage = safeMessage(error, "本机 Runtime 连接失败；基础私教不受影响。");
   } finally {
@@ -350,7 +365,11 @@ async function connectRuntime() {
 
 function updateRuntimeCallout() {
   if (localAgentClient?.connected) {
-    elements.runtimeCalloutCopy.textContent = "本机 Runtime 已连接；下方是本次对安装、凭据和员工契约的真实检测结果。";
+    const employee = runtimeWorkspace?.employee;
+    const workspaceCopy = employee
+      ? `已构建并锁定 Digital Employee 工作区：${employee.name} ${employee.version}（${employee.digest.slice(0, 19)}…）。`
+      : "已连接本机 Runtime。";
+    elements.runtimeCalloutCopy.textContent = `${workspaceCopy} 下方是本次对 Agent 安装、凭据和员工契约的真实检测结果；切换 Agent 只替换“大脑”，不会替换浏览器学习档案。`;
     elements.runtimeConnect.textContent = "重新检测本机 Agent";
     return;
   }
@@ -362,7 +381,7 @@ function updateRuntimeCallout() {
   } else if (PUBLIC_COACH_PAGE) {
     elements.runtimeConnect.hidden = false;
     elements.runtimeInstallLink.hidden = false;
-    elements.runtimeCalloutCopy.textContent = "这是公开网页。下方先展示框架能力，不代表本机已安装；只有你点击后，才会打开 127.0.0.1 确认并检测，页面加载时不会扫描端口。";
+    elements.runtimeCalloutCopy.textContent = "这是公开网页。点击后会先检测已运行的 Runtime；macOS 未运行时可通过固定安全入口唤起应用，Linux 请先运行 start-local-coach。只有确认服务就绪后才打开 127.0.0.1 配对页，页面加载时不会扫描端口。";
   } else {
     elements.runtimeConnect.hidden = true;
     elements.runtimeInstallLink.hidden = false;

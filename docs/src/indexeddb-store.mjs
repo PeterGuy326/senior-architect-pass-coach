@@ -67,7 +67,8 @@ function transactionDone(transaction) {
 function sameAttempt(left, right) {
   const keys = [
     "attempt_id", "item_id", "topic_id", "subject", "skill", "score", "max_score",
-    "confidence", "declared_confidence", "confidence_source", "behavior_signal", "timing_source", "timing_quality",
+    "confidence", "declared_confidence", "confidence_source", "behavior_signal", "behavior_reason_code", "pace_bucket",
+    "timing_source", "timing_quality",
     "duration_seconds", "first_choice_seconds", "answer_changes",
     "result", "at", "source_ref", "content_revision",
   ];
@@ -108,8 +109,16 @@ function validateSession(session) {
   assertContentFree(session, "学习会话");
 }
 
+function instantMillis(value) {
+  const timestamp = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(timestamp)) {
+    throw error("INVALID_INSTANT", "作答时间必须是 ISO-8601 时间。");
+  }
+  return timestamp;
+}
+
 function orderedAttempts(rawAttempts) {
-  return clone(rawAttempts || []).sort((left, right) => String(left.at).localeCompare(String(right.at))
+  return clone(rawAttempts || []).sort((left, right) => instantMillis(left.at) - instantMillis(right.at)
     || String(left.attempt_id).localeCompare(String(right.attempt_id)));
 }
 

@@ -19,6 +19,21 @@ const BEHAVIOR_SIGNALS = new Set([
   "insufficient_signal",
   "steady",
 ]);
+const BEHAVIOR_REASON_CODES = new Set([
+  "clean_confident_correct",
+  "confident_wrong",
+  "deliberate_reading_only",
+  "explicit_guess",
+  "explicit_unsure",
+  "fast_correct_ambiguous",
+  "fast_wrong_guess_risk",
+  "revision_heavy",
+  "steady_single_observation",
+  "timing_unavailable",
+]);
+const PACE_BUCKETS = Object.freeze(["very_fast", "fast", "expected", "deliberate", "extended"]);
+const PACE_BUCKET_SET = new Set([...PACE_BUCKETS, "unavailable"]);
+const MAX_BASELINE_OBSERVATIONS = 48;
 const TIMING_SOURCES = new Set(["live", "restored", "unavailable"]);
 const TIMING_QUALITIES = new Set(["clean", "interrupted", "resumed", "unavailable"]);
 const ATTEMPT_KEYS = new Set([
@@ -33,6 +48,8 @@ const ATTEMPT_KEYS = new Set([
   "declared_confidence",
   "confidence_source",
   "behavior_signal",
+  "behavior_reason_code",
+  "pace_bucket",
   "timing_source",
   "timing_quality",
   "duration_seconds",
@@ -112,6 +129,33 @@ function blankRecognition() {
   };
 }
 
+function blankResponseBaseline() {
+  return {
+    schema_version: "web-response-baseline.v1",
+    eligible_count: 0,
+    pace_bucket_counts: Object.fromEntries(PACE_BUCKETS.map((bucket) => [bucket, 0])),
+  };
+}
+
+function normalizedResponseBaseline(raw) {
+  if (raw?.schema_version !== "web-response-baseline.v1") return blankResponseBaseline();
+  const counts = Object.fromEntries(PACE_BUCKETS.map((bucket) => {
+    const count = raw.pace_bucket_counts?.[bucket];
+    return [bucket, Number.isSafeInteger(count) && count >= 0 && count <= MAX_BASELINE_OBSERVATIONS ? count : 0];
+  }));
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  if (total > MAX_BASELINE_OBSERVATIONS || raw.eligible_count !== total) return blankResponseBaseline();
+  return {
+    schema_version: "web-response-baseline.v1",
+    eligible_count: total,
+    pace_bucket_counts: counts,
+  };
+}
+
+export function responseBehaviorBaseline(progress) {
+  return clone(normalizedResponseBaseline(progress?.response_behavior_baseline));
+}
+
 export function createLocalProfile({ principalId, examDate = null, dailyMinutes = 45, now } = {}) {
   if (typeof principalId !== "string" || !/^local:[A-Za-z0-9._:-]{8,160}$/u.test(principalId)) {
     fail("LOCAL_PRINCIPAL_REQUIRED", "必须使用浏览器本地签发的学习身份。");
@@ -141,6 +185,7 @@ export function createBlankProgress({ now } = {}) {
     strategy: { pass_line: PASS_LINE, safe_target: SAFETY_TARGET },
     subjects: Object.fromEntries(SUBJECTS.map((subject) => [subject, blankSubject()])),
     topics: {},
+    response_behavior_baseline: blankResponseBaseline(),
     applied_attempt_ids: [],
     created_at: createdAt,
     last_session_at: null,
@@ -206,6 +251,8 @@ function validateAttempt(attempt) {
       !CONFIDENCE.has(attempt.declared_confidence) ||
       !["default", "explicit"].includes(attempt.confidence_source) ||
       !BEHAVIOR_SIGNALS.has(attempt.behavior_signal) ||
+      (Object.hasOwn(attempt, "behavior_reason_code") && !BEHAVIOR_REASON_CODES.has(attempt.behavior_reason_code)) ||
+      (Object.hasOwn(attempt, "pace_bucket") && !PACE_BUCKET_SET.has(attempt.pace_bucket)) ||
       !TIMING_SOURCES.has(attempt.timing_source) ||
       !TIMING_QUALITIES.has(attempt.timing_quality) ||
       (attempt.timing_source === "live" && !["clean", "interrupted"].includes(attempt.timing_quality)) ||
@@ -236,6 +283,8 @@ function validateAttempt(attempt) {
     "duration_seconds",
     "first_choice_seconds",
     "answer_changes",
+    "behavior_reason_code",
+    "pace_bucket",
   ].some((key) => Object.hasOwn(attempt, key))) {
     fail("INVALID_ATTEMPT", "答题行为证据不完整。");
   }
@@ -282,7 +331,16 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
   record.latest_ratio = attempt.score;
   record.latest_confidence = attempt.confidence;
   record.latest_behavior_signal = attempt.behavior_signal || null;
-  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(attempt.behavior_signal);
+  record.latest_behavior_reason_code = attempt.behavior_reason_code || ({
+    fluent: "clean_confident_correct",
+    hesitant: "revision_heavy",
+    likely_guess: "fast_wrong_guess_risk",
+    overconfident_wrong: "confident_wrong",
+    insufficient_signal: "timing_unavailable",
+    steady: "steady_single_observation",
+  }[attempt.behavior_signal] || null);
+  const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong", "insufficient_signal"]
+    .includes(attempt.behavior_signal);
   const stabilityEligible = attempt.confidence === "sure" && (!behaviorRisk || attempt.score === 0);
   if (stabilityEligible) {
     record.stability_score_sum = Number(record.stability_score_sum || 0) + attempt.score;
@@ -319,6 +377,25 @@ export function applyObjectiveAttempt(progress, rawAttempt) {
   topic.last_attempt_at = attempt.at;
   topic.next_review_at = record.next_review_at;
   next.topics[attempt.topic_id] = topic;
+  const baseline = normalizedResponseBaseline(next.response_behavior_baseline);
+  const baselineEligible = attempt.score === 1
+    && attempt.confidence !== "guess"
+    && attempt.timing_source === "live"
+    && attempt.timing_quality === "clean"
+    && attempt.answer_changes === 0
+    && PACE_BUCKETS.includes(attempt.pace_bucket);
+  if (baselineEligible) {
+    if (baseline.eligible_count >= MAX_BASELINE_OBSERVATIONS) {
+      for (const bucket of PACE_BUCKETS) {
+        baseline.pace_bucket_counts[bucket] = Math.floor(baseline.pace_bucket_counts[bucket] / 2);
+      }
+      baseline.eligible_count = Object.values(baseline.pace_bucket_counts)
+        .reduce((sum, count) => sum + count, 0);
+    }
+    baseline.pace_bucket_counts[attempt.pace_bucket] += 1;
+    baseline.eligible_count += 1;
+  }
+  next.response_behavior_baseline = baseline;
   const subject = next.subjects.comprehensive;
   subject.evidence_count += 1;
   subject.last_practiced_at = attempt.at;

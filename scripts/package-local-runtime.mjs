@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { access, chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export const MAC_RUNTIME_URL_SCHEME = "senior-architect-pass-coach";
 
 function argument(name, fallback = null) {
   const index = process.argv.indexOf(`--${name}`);
@@ -63,6 +65,38 @@ async function copyNodeLicense(nodeBinary, target) {
   throw new Error("node_license_not_found");
 }
 
+export function createMacInfoPlist(version) {
+  const safeVersion = safeSegment(version, "version");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleDisplayName</key><string>架构过线私教</string>
+  <key>CFBundleExecutable</key><string>architect-pass-coach</string>
+  <key>CFBundleIdentifier</key><string>io.github.peterguy326.architect-pass-coach</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Senior Architect Pass Coach</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${safeVersion}</string>
+  <key>CFBundleVersion</key><string>${safeVersion}</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>CFBundleURLName</key><string>io.github.peterguy326.architect-pass-coach.runtime-launch</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>${MAC_RUNTIME_URL_SCHEME}</string></array>
+    </dict>
+  </array>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMultipleInstancesProhibited</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+`;
+}
+
 async function packageMac({ outputDirectory, nodeBinary, arch, version }) {
   const appName = "Senior Architect Pass Coach.app";
   const appRoot = path.join(outputDirectory, appName);
@@ -80,30 +114,15 @@ async function packageMac({ outputDirectory, nodeBinary, arch, version }) {
 set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 RESOURCE_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../Resources" && pwd)"
-exec /bin/zsh -lc 'exec "$1" "$2" --open' architect-pass-coach "$RESOURCE_DIR/node" "$RESOURCE_DIR/app/service/runtime-cli.mjs"
+# LaunchServices may supply an untrusted deep-link value to the executable.
+# Deliberately ignore every incoming argument: the URL scheme is a launch-only
+# signal and can never select a command, URL, file or Runtime option.
+exec /bin/zsh -lc 'exec "$1" "$2"' architect-pass-coach "$RESOURCE_DIR/node" "$RESOURCE_DIR/app/service/runtime-cli.mjs"
 `;
   await writeFile(executable, launcher, { mode: 0o755 });
   await chmod(executable, 0o755);
 
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
-  <key>CFBundleDisplayName</key><string>架构过线私教</string>
-  <key>CFBundleExecutable</key><string>architect-pass-coach</string>
-  <key>CFBundleIdentifier</key><string>io.github.peterguy326.architect-pass-coach</string>
-  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Senior Architect Pass Coach</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>${version}</string>
-  <key>CFBundleVersion</key><string>${version}</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
-  <key>LSMultipleInstancesProhibited</key><true/>
-  <key>NSHighResolutionCapable</key><true/>
-</dict>
-</plist>
-`;
+  const plist = createMacInfoPlist(version);
   await writeFile(path.join(contents, "Info.plist"), plist);
 
   const metadata = {
@@ -166,4 +185,11 @@ async function main() {
   process.stdout.write(`${result}\n`);
 }
 
-await main();
+let isMainModule = false;
+try {
+  isMainModule = Boolean(process.argv[1])
+    && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  isMainModule = false;
+}
+if (isMainModule) await main();

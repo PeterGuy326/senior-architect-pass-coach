@@ -20,6 +20,7 @@ import {
   objectiveResult,
   planDailyTasks,
   progressSummary,
+  responseBehaviorBaseline,
 } from "./progress-rules.mjs";
 import {
   assessResponseBehavior,
@@ -408,10 +409,12 @@ export class BrowserCoachHarness {
     if (expectedRevision !== this.session.revision || expectedItemId !== this.question.item_id) {
       throw coachError("STALE_VIEW", "页面题目或版本已经过期，请刷新后继续。");
     }
+    const personalBaseline = responseBehaviorBaseline(this.progress);
     const calibration = calibrateResponseConfidence({
       question: this.question,
       observation: submission.behavior,
       declaredConfidence: submission.confidence,
+      personalBaseline,
     });
     this.state = WEB_HARNESS_STATES.EVALUATING;
     this.message = "正在使用固定答案键判定；如已连接 Agent，讲解会在进度提交后生成。";
@@ -429,6 +432,7 @@ export class BrowserCoachHarness {
         observation: submission.behavior,
         declaredConfidence: submission.confidence,
         correct: grade.correct,
+        personalBaseline,
       });
       const now = nowFrom(this.clock);
       const attempt = {
@@ -443,6 +447,8 @@ export class BrowserCoachHarness {
         declared_confidence: behavior.declared_confidence,
         confidence_source: behavior.confidence_source,
         behavior_signal: behavior.signal,
+        behavior_reason_code: behavior.reason_code,
+        pace_bucket: behavior.pace_bucket,
         timing_source: behavior.timing_source,
         timing_quality: behavior.timing_quality,
         duration_seconds: behavior.duration_seconds,
@@ -466,6 +472,9 @@ export class BrowserCoachHarness {
           behavior: {
             schema_version: behavior.schema_version,
             signal: behavior.signal,
+            reason_code: behavior.reason_code,
+            timing_band: behavior.timing_band,
+            pace_bucket: behavior.pace_bucket,
             timing_source: behavior.timing_source,
             timing_quality: behavior.timing_quality,
             declared_confidence: behavior.declared_confidence,
@@ -474,6 +483,9 @@ export class BrowserCoachHarness {
             duration_seconds: behavior.duration_seconds,
             first_choice_seconds: behavior.first_choice_seconds,
             answer_changes: behavior.answer_changes,
+            expected_duration_seconds: behavior.expected_duration_seconds,
+            question_load: behavior.question_load,
+            baseline_source: behavior.baseline_source,
             summary: behavior.summary,
           },
         },
@@ -484,7 +496,8 @@ export class BrowserCoachHarness {
       this.responseBehavior = behavior;
       this.state = WEB_HARNESS_STATES.FEEDBACK;
       this.lastError = null;
-      const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong"].includes(behavior.signal);
+      const behaviorRisk = ["hesitant", "likely_guess", "overconfident_wrong", "insufficient_signal"]
+        .includes(behavior.signal);
       this.message = grade.result === "mastered"
         ? (behaviorRisk
           ? "这题答对且自报确定；行为信号仍建议复测，本次不计入稳定掌握证据。"
@@ -706,12 +719,15 @@ export class BrowserCoachHarness {
         const topic = this.progress?.topics?.[task.topic_id];
         const mastery = Number(topic?.mastery?.recognition?.mastery);
         const latestBehavior = topic?.mastery?.recognition?.latest_behavior_signal;
-        const behaviorReason = {
+        const latestReasonCode = topic?.mastery?.recognition?.latest_behavior_reason_code;
+        const behaviorReason = typeof latestReasonCode === "string" && /^[a-z0-9_]{1,64}$/u.test(latestReasonCode)
+          ? latestReasonCode
+          : ({
           fluent: "answer_fluent",
           hesitant: "answer_hesitant",
           likely_guess: "answer_likely_guess",
           overconfident_wrong: "answer_overconfident_wrong",
-        }[latestBehavior] || null;
+          }[latestBehavior] || null);
         const reviewDue = task.review_due === true || task.action === "review" || task.action === "retest";
         return {
           topic_id: safeAgentText(task.topic_id, 128),

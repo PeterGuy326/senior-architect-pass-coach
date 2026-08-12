@@ -17,13 +17,14 @@
 如果你希望老师不仅判题，还能结合既往弱项追问、换一种方式解释和给出针对性的补救动作，可从 [Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载对应系统的 **Local Agent Runtime**：
 
 1. macOS 下载 Apple Silicon 或 Intel 的应用包，解压后打开“架构过线私教”；Linux x64（glibc 2.28+）解压后运行 `start-local-coach`。需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
-2. Runtime 只在 `127.0.0.1:43127` 启动配对桥，并打开上面的公开 Pages；如果浏览器没有自动打开，也可手动回到同一个链接。
-3. 在 Pages 点击“连接本机 Agent”。浏览器会打开一个由本机 Runtime 提供的确认窗口；确认后回到原页面，并按浏览器提示允许访问本机网络。
-4. 从 Runtime 实际检查通过的引擎中选择一个。选择 Codex 时还会出现一次明确的个人模式授权；可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
+2. macOS 首次解压后打开一次 `.app`，让系统登记 `senior-architect-pass-coach://` 启动入口；Runtime 仍只在 `127.0.0.1:43127` 启动配对桥。这个入口只负责启动应用，不接收令牌、命令、文件路径或网页参数。
+3. 在 Pages 点击“连接本机 Agent”。网页先检测 Runtime 是否已经运行；已运行就直接进入配对。macOS 未运行时会尝试唤起已安装应用，Linux 则需先运行 `start-local-coach`。只有识别到正确 Runtime 后才把等待窗口导航到本机确认页，因此未安装或启动失败不会再打开一个坏掉的 `127.0.0.1` 页面。
+4. Runtime 会先密封一份只读 Digital Employee 员工工作区，并把员工名、版本和摘要绑定到本次会话；探测、Schema 校验和实际执行都使用这一份工作区。
+5. 从 Runtime 实际检查通过的引擎中选择一个作为私教“大脑”。选择 Codex 时还会出现一次明确的个人模式授权；可信判分仍先在 Pages 的浏览器本地完成，Agent 只负责个性化讲解。
 
 这是“下载应用并打开”，不是 clone 仓库、安装 npm 依赖或本地编译。当前预览包尚未做 Apple notarization；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。macOS 首次打开可先在 Finder 中右键选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。Pages 在加载时不会扫描本机端口；只有点击连接后才访问固定的 loopback 地址并请求浏览器许可。
 
-桌面 Chrome/Edge 是当前 Agent 配对主路径；浏览器可能显示本地网络访问许可，拒绝后仍可继续使用基础私教。Safari、Firefox 或受管浏览器若阻止公开 HTTPS 页面访问本机 HTTP loopback，会明确降级为 `content-only`，不会影响已有档案。手机上的 `127.0.0.1` 指向手机自身，不能连接电脑上的 Runtime，因此移动端同样使用基础私教。项目不会为了绕过这些限制而监听局域网地址。
+桌面 Chrome/Edge 是当前 Agent 配对主路径；首次从网页唤起时，浏览器可能询问是否允许打开“架构过线私教”，随后还可能显示本地网络访问许可。拒绝后仍可继续使用基础私教。Safari、Firefox 或受管浏览器若阻止 custom scheme、弹窗或公开 HTTPS 页面访问本机 HTTP loopback，会给出安装/启动诊断并降级为 `content-only`，不会影响已有档案。手机上的 `127.0.0.1` 指向手机自身，不能连接电脑上的 Runtime，因此移动端同样使用基础私教。项目不会为了绕过这些限制而监听局域网地址。
 
 配对窗口与 Pages 虽然是两个 Origin，但它只负责确认授权，不保存也不迁移学习档案。短期 Bearer 通过精确来源校验的 `postMessage` 交给原 Pages 页面，随后仅留在 JavaScript 私有内存；题目、作答和进度仍在原 Pages Origin 的 IndexedDB，所以不再需要在两个页面之间导出、导入或合并档案。
 
@@ -53,7 +54,7 @@ Digital Employee 当前的真实兼容边界如下：
 
 - 直接在浏览器聊天：输入“今天学什么”“查看进度”“继续”“出题”，或直接提交 A–H 单选/多选答案；连接 Runtime 后还可向所选 Agent 自然语言追问；
 - 从固定公开 commit 读取综合客观题，作答前只展示题干与选项，提交后才返回可信答案和解析；
-- 结合前台有效用时、首次选择和改选次数给出“熟练倾向 / 犹豫 / 可能在猜”信号；它不改写固定答案键判分，只会保守降低稳定证据等级并安排复测，不会单凭快答升级掌握；
+- 先按题干、选项长度与数量、否定/逻辑/数字复杂度估算正常用时；积累至少 6 条合格记录后再用个人节奏基线校正，并结合前台有效用时、首次选择和改选次数给出“熟练倾向 / 犹豫 / 可能在猜”信号；它不改写固定答案键判分，不会单凭快答升级掌握，慢读且未反复改选也不会被判成不会；
 - 在浏览器本地原子保存档案、进度与无题文作答证据，支持刷新恢复、导出、导入和一键清除；
 - 明确显示 45 分过线线、52 分安全目标、每日最多 3 项，以及综合/案例/论文的已测量边界；
 - `setup`：在仓库外建立本地私人档案与授权上下文；
@@ -146,7 +147,7 @@ npm run coach -- session start \
 
 CLI Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，并重新注入当前题目和批准材料。当前零安装网页使用同一套教学规则的浏览器 `content-only` Adapter；未来 IM 连接器可以复用机器轮次契约。
 
-Local Agent Runtime 采用 Hybrid Harness：出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选合格 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Codex 个人实验模式遵守同一提交顺序，但采用更窄的资料投影：只把科目、考点、掌握结果和去身份化进度交给模型，模型仅选择枚举化补救计划，本地模板再渲染建议；题干、选项、作答、参考答案和解析都不会进入 Codex Prompt。它使用临时隔离目录、ephemeral `codex exec`、结构化输出，以及关闭模型工具网络与写入的 Permission Profile；Codex 自身的 OpenAI 控制面连接仍用于生成回复。它仍因 stock Codex 无法证明完整模型工具目录而不属于合格框架 Adapter。Runtime 的产品职责是 loopback 配对与执行，不拥有第二份网页档案。
+Local Agent Runtime 采用 Hybrid Harness：启动时用 Digital Employee 密封并固定一份只读员工工作区，员工摘要、Schema、兼容性探测和执行都绑定到同一 digest；Agent 只是可替换的大脑。出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选合格 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Codex 个人实验模式遵守同一提交顺序，但采用更窄的资料投影：只把科目、考点、掌握结果和去身份化进度交给模型，模型仅选择枚举化补救计划，本地模板再渲染建议；题干、选项、作答、参考答案和解析都不会进入 Codex Prompt。它使用临时隔离目录、ephemeral `codex exec`、结构化输出，以及关闭模型工具网络与写入的 Permission Profile；Codex 自身的 OpenAI 控制面连接仍用于生成回复。它仍因 stock Codex 无法证明完整模型工具目录而不属于合格框架 Adapter。Runtime 的产品职责是工作区绑定、loopback 配对与执行，不拥有第二份网页档案。
 
 用户首先看到的是员工自己的名称、欢迎语和发布者声明；Digital Employee 作为基础设施归属，Qwen/Claude/CodeBuddy 等仅作为可替换 engine 出现在运行信息中。当前品牌 sidecar 是本项目的先行约定，通用 package presentation 已反馈到上游 [Issue #102](https://github.com/fullstack-ai-infra/digital-employee/issues/102)。
 

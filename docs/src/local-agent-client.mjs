@@ -1,10 +1,17 @@
-export const LOOPBACK_PROTOCOL = "coach-loopback.v2";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v3";
 export const DEFAULT_RUNTIME_ORIGIN = "http://127.0.0.1:43127";
 export const PUBLIC_COACH_ORIGIN = "https://peterguy326.github.io";
+export const RUNTIME_LAUNCH_URL = "senior-architect-pass-coach://launch";
+const AGENT_CATALOG_SCHEMA = "coach-agent-catalog.v1";
+const WORKSPACE_SCHEMA = "coach-local-workspace.v1";
 
 const PAIRING_MESSAGE_TYPE = "coach.runtime.grant";
 const PAIRING_STATE = /^[A-Za-z0-9_-]{32,128}$/u;
 const RUNTIME_TOKEN = /^[A-Za-z0-9_-]{43}$/u;
+const RUNTIME_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const PACKAGE_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/u;
+const PACKAGE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u;
+const PACKAGE_DIGEST = /^sha256:[a-f0-9]{64}$/u;
 
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_COACHING_CHARS = 2_000;
@@ -43,6 +50,34 @@ function clientError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function reportStage(callback, stage) {
+  try { callback?.(stage); } catch { /* UI status reporting cannot break pairing */ }
+}
+
+function navigatePopup(popup, target) {
+  if (!popup || popup.closed) {
+    throw clientError("PAIRING_POPUP_CLOSED", "本机连接窗口已关闭，请重新点击连接。");
+  }
+  try {
+    if (typeof popup.location?.replace === "function") popup.location.replace(target);
+    else popup.location.href = target;
+  } catch {
+    throw clientError("PAIRING_POPUP_NAVIGATION_FAILED", "浏览器阻止了本机连接窗口，请允许打开应用和弹窗后重试。");
+  }
+}
+
+function showLauncherPlaceholder(popup) {
+  try {
+    popup.document.title = "正在连接本机 Runtime";
+    popup.document.documentElement.lang = "zh-CN";
+    popup.document.body.textContent = "正在检测并唤起架构过线私教 Runtime。确认服务就绪后，这个窗口才会进入本机配对页。";
+  } catch { /* best-effort; a WindowProxy is enough for later navigation */ }
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
 
 function cleanText(value, maximum = MAX_COACHING_CHARS) {
@@ -190,6 +225,49 @@ function safeAdapter(raw) {
   });
 }
 
+function safeWorkspaceBinding(raw) {
+  if (
+    !raw
+    || typeof raw !== "object"
+    || Array.isArray(raw)
+    || raw.schema_version !== WORKSPACE_SCHEMA
+    || raw.state !== "ready"
+    || raw.memory_owner !== "browser_harness"
+    || raw.agent_role !== "replaceable_brain"
+    || !raw.employee
+    || typeof raw.employee !== "object"
+    || Array.isArray(raw.employee)
+    || typeof raw.employee.name !== "string"
+    || raw.employee.name !== "senior-architect-pass-coach"
+    || typeof raw.employee.version !== "string"
+    || typeof raw.employee.digest !== "string"
+    || !PACKAGE_NAME.test(raw.employee.name)
+    || !PACKAGE_VERSION.test(raw.employee.version)
+    || !PACKAGE_DIGEST.test(raw.employee.digest)
+  ) {
+    throw clientError("RUNTIME_UPDATE_REQUIRED", "本机 Runtime 未提供受绑定的 Digital Employee 工作区，请更新 Runtime 后重试。");
+  }
+  const allowedWorkspaceKeys = ["agent_role", "employee", "memory_owner", "schema_version", "state"];
+  const allowedEmployeeKeys = ["digest", "name", "version"];
+  if (
+    Object.keys(raw).some((key) => !allowedWorkspaceKeys.includes(key))
+    || Object.keys(raw.employee).some((key) => !allowedEmployeeKeys.includes(key))
+  ) {
+    throw clientError("INVALID_WORKSPACE_BINDING", "本机 Runtime 返回了无效的 Digital Employee 工作区绑定。");
+  }
+  return Object.freeze({
+    schema_version: WORKSPACE_SCHEMA,
+    state: "ready",
+    employee: Object.freeze({
+      name: raw.employee.name,
+      version: raw.employee.version,
+      digest: raw.employee.digest,
+    }),
+    memory_owner: "browser_harness",
+    agent_role: "replaceable_brain",
+  });
+}
+
 function requestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   if (globalThis.crypto?.getRandomValues) {
@@ -216,6 +294,7 @@ export class LocalAgentClient {
   #fetch;
   #token = null;
   #instanceId = null;
+  #workspace = null;
   #idFactory;
 
   constructor({ origin = DEFAULT_RUNTIME_ORIGIN, fetchImpl = globalThis.fetch, idFactory = requestId } = {}) {
@@ -241,7 +320,162 @@ export class LocalAgentClient {
       connected: this.connected,
       protocol: LOOPBACK_PROTOCOL,
       instance_id: this.#instanceId,
+      workspace: this.#workspace,
     });
+  }
+
+  /**
+   * Performs an explicit, user-triggered health check. It never bootstraps a
+   * bearer and is intentionally not called during page load.
+   */
+  async probe({ timeoutMs = 700 } = {}) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > 10_000) {
+      throw new TypeError("timeoutMs_must_be_50_to_10000");
+    }
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await this.#fetch(new URL("/v1/health", this.#origin).href, {
+        method: "GET",
+        mode: "cors",
+        headers: { Accept: "application/json" },
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        signal: controller.signal,
+      });
+    } catch {
+      throw clientError("RUNTIME_UNREACHABLE", "本机 Runtime 尚未运行。");
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+    if (!response?.ok) {
+      throw clientError("RUNTIME_HEALTH_REJECTED", "43127 端口有响应，但它拒绝了私教 Runtime 探活；请关闭占用该端口的程序后重试。");
+    }
+    const declaredLength = Number(response.headers?.get?.("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+      throw clientError("RUNTIME_IDENTITY_MISMATCH", "43127 端口不是可识别的私教 Runtime。");
+    }
+    const text = await response.text();
+    if (text.length > MAX_RESPONSE_BYTES) {
+      throw clientError("RUNTIME_IDENTITY_MISMATCH", "43127 端口不是可识别的私教 Runtime。");
+    }
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch {
+      throw clientError("RUNTIME_IDENTITY_MISMATCH", "43127 端口不是可识别的私教 Runtime。");
+    }
+    if (
+      !result
+      || typeof result !== "object"
+      || Array.isArray(result)
+      || result.protocol !== LOOPBACK_PROTOCOL
+      || result.status !== "ready"
+      || result.workspace_status !== "ready"
+      || typeof result.instance_id !== "string"
+      || !RUNTIME_INSTANCE.test(result.instance_id)
+    ) {
+      throw clientError("RUNTIME_IDENTITY_MISMATCH", "43127 端口不是可识别的私教 Runtime。");
+    }
+    return Object.freeze({
+      protocol: LOOPBACK_PROTOCOL,
+      status: "ready",
+      instance_id: cleanText(result.instance_id, 128),
+      workspace_status: "ready",
+    });
+  }
+
+  /**
+   * Page-entry lifecycle for an installed Runtime. A same-click placeholder
+   * popup is retained while the client probes localhost. If Runtime is down,
+   * that popup is navigated to one fixed, launch-only custom URL scheme. Only
+   * after the expected health contract is observed may it navigate to the
+   * loopback pairing page. No bearer, state, command, URL or path is ever put
+   * in the deep link.
+   */
+  async wakeAndPair({
+    windowRef = globalThis.window,
+    onStage,
+    initialProbeTimeoutMs = 700,
+    startupTimeoutMs = 8_000,
+    pollIntervalMs = 300,
+    pairTimeoutMs = 120_000,
+  } = {}) {
+    this.disconnect();
+    if (
+      !windowRef
+      || typeof windowRef.open !== "function"
+      || typeof windowRef.addEventListener !== "function"
+      || typeof windowRef.removeEventListener !== "function"
+    ) {
+      throw clientError("PAIRING_UNAVAILABLE", "当前浏览器不能打开本机 Agent 配对窗口。");
+    }
+    if (!Number.isSafeInteger(startupTimeoutMs) || startupTimeoutMs < 100 || startupTimeoutMs > 60_000) {
+      throw new TypeError("startupTimeoutMs_must_be_100_to_60000");
+    }
+    if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 10 || pollIntervalMs > 2_000) {
+      throw new TypeError("pollIntervalMs_must_be_10_to_2000");
+    }
+    let popup;
+    try {
+      popup = windowRef.open(
+        "about:blank",
+        "_blank",
+        "popup,width=520,height=680,resizable=yes,scrollbars=yes",
+      );
+    } catch {
+      popup = null;
+    }
+    if (!popup) {
+      throw clientError("PAIRING_POPUP_BLOCKED", "浏览器拦截了连接窗口，请允许本站弹窗后重试。");
+    }
+    showLauncherPlaceholder(popup);
+
+    try {
+      reportStage(onStage, "checking");
+      let health;
+      try {
+        health = await this.probe({ timeoutMs: initialProbeTimeoutMs });
+      } catch (error) {
+        if (error?.code !== "RUNTIME_UNREACHABLE") throw error;
+        reportStage(onStage, "launching");
+        navigatePopup(popup, RUNTIME_LAUNCH_URL);
+        reportStage(onStage, "waiting");
+        const deadline = Date.now() + startupTimeoutMs;
+        let ready = false;
+        while (Date.now() < deadline) {
+          if (popup.closed) {
+            throw clientError("PAIRING_POPUP_CLOSED", "本机连接窗口已关闭，请重新点击连接。");
+          }
+          await delay(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
+          try {
+            health = await this.probe({ timeoutMs: Math.min(initialProbeTimeoutMs, Math.max(50, deadline - Date.now())) });
+            ready = true;
+            break;
+          } catch (probeError) {
+            if (probeError?.code !== "RUNTIME_UNREACHABLE") throw probeError;
+          }
+        }
+        if (!ready) {
+          throw clientError(
+            "RUNTIME_START_TIMEOUT",
+            "本机 Runtime 未能启动：可能尚未安装、浏览器未获准唤起，或应用启动失败。请先安装最新 Runtime；若已经安装，请允许浏览器打开“架构过线私教”后重试。",
+          );
+        }
+      }
+      reportStage(onStage, "pairing");
+      return await this.pair({
+        windowRef,
+        timeoutMs: pairTimeoutMs,
+        popupRef: popup,
+        expectedInstanceId: health.instance_id,
+      });
+    } catch (error) {
+      try { popup.close?.(); } catch { /* best-effort popup cleanup */ }
+      throw error;
+    }
   }
 
   async connect() {
@@ -276,7 +510,12 @@ export class LocalAgentClient {
    * The bearer never appears in a URL, DOM node, browser store, or return
    * value; it moves from the loopback popup to this private field only.
    */
-  pair({ windowRef = globalThis.window, timeoutMs = 120_000 } = {}) {
+  pair({
+    windowRef = globalThis.window,
+    timeoutMs = 120_000,
+    popupRef = null,
+    expectedInstanceId = null,
+  } = {}) {
     this.disconnect();
     if (
       !windowRef
@@ -288,6 +527,9 @@ export class LocalAgentClient {
     }
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000) {
       return Promise.reject(new TypeError("timeoutMs_must_be_1000_to_300000"));
+    }
+    if (expectedInstanceId !== null && !RUNTIME_INSTANCE.test(expectedInstanceId)) {
+      return Promise.reject(new TypeError("expectedInstanceId_invalid"));
     }
     let state;
     try {
@@ -303,7 +545,7 @@ export class LocalAgentClient {
 
     return new Promise((resolve, reject) => {
       let settled = false;
-      let popup = null;
+      let popup = popupRef;
       const finish = (error, grant) => {
         if (settled) return;
         settled = true;
@@ -325,8 +567,8 @@ export class LocalAgentClient {
           || data.state !== state
           || !RUNTIME_TOKEN.test(data.access_token)
           || typeof data.instance_id !== "string"
-          || data.instance_id.length < 1
-          || data.instance_id.length > 128
+          || !RUNTIME_INSTANCE.test(data.instance_id)
+          || (expectedInstanceId !== null && data.instance_id !== expectedInstanceId)
         ) {
           finish(clientError("PAIRING_RESPONSE_INVALID", "本机 Runtime 返回了无效配对授权。"));
           return;
@@ -345,17 +587,25 @@ export class LocalAgentClient {
       const timeout = globalThis.setTimeout(() => {
         finish(clientError("PAIRING_TIMEOUT", "本机 Agent 配对已超时，请重新连接。"));
       }, timeoutMs);
-      try {
-        popup = windowRef.open(
-          pairUrl.href,
-          `coach-agent-pair-${state}`,
-          "popup,width=520,height=680,resizable=yes,scrollbars=yes",
-        );
-      } catch {
-        popup = null;
-      }
-      if (!popup) {
-        finish(clientError("PAIRING_POPUP_BLOCKED", "浏览器拦截了配对窗口，请允许弹窗后重试。"));
+      if (popup) {
+        try {
+          navigatePopup(popup, pairUrl.href);
+        } catch (error) {
+          finish(error);
+        }
+      } else {
+        try {
+          popup = windowRef.open(
+            pairUrl.href,
+            `coach-agent-pair-${state}`,
+            "popup,width=520,height=680,resizable=yes,scrollbars=yes",
+          );
+        } catch {
+          popup = null;
+        }
+        if (!popup) {
+          finish(clientError("PAIRING_POPUP_BLOCKED", "浏览器拦截了配对窗口，请允许弹窗后重试。"));
+        }
       }
     });
   }
@@ -363,14 +613,16 @@ export class LocalAgentClient {
   disconnect() {
     this.#token = null;
     this.#instanceId = null;
+    this.#workspace = null;
   }
 
   async listAdapters() {
     this.#assertConnected();
     const result = await this.#request("/v1/adapters", { authenticated: true });
-    if (result.protocol !== LOOPBACK_PROTOCOL) {
+    if (result.protocol !== LOOPBACK_PROTOCOL || result.schema_version !== AGENT_CATALOG_SCHEMA) {
       throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
     }
+    this.#workspace = safeWorkspaceBinding(result.workspace);
     if (!Array.isArray(result.adapters) || result.adapters.length > 24) {
       throw clientError("INVALID_ADAPTER_RESPONSE", "本机 Runtime 的引擎清单无效。");
     }

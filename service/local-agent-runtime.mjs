@@ -17,11 +17,13 @@ import {
   COACH_ENGINE_CATALOG,
   createCoachAgentHostRegistry,
 } from "./agent-host-registry.mjs";
+import { createLocalEmployeeWorkspace } from "./local-employee-workspace.mjs";
 import { employeePackageDirectory, repositoryRoot } from "./paths.mjs";
 import { validateTeachingOutput } from "./proposal-validator.mjs";
-import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validator.mjs";
+import { createEmployeeSchemaValidators } from "./schema-validator.mjs";
 
-export const LOOPBACK_PROTOCOL = "coach-loopback.v2";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v3";
+const AGENT_CATALOG_SCHEMA = "coach-agent-catalog.v1";
 export const LOOPBACK_HOST = "127.0.0.1";
 export const DEFAULT_LOOPBACK_PORT = 43_127;
 export const PUBLIC_COACH_URL = "https://peterguy326.github.io/senior-architect-pass-coach/";
@@ -353,7 +355,7 @@ function approvedMaterial(question, grade) {
   };
 }
 
-async function buildEmployeeInput(request) {
+async function buildEmployeeInput(request, validateEmployeeInput) {
   const isEvaluation = Boolean(request.trustedGrade);
   const action = isEvaluation ? "submit" : (request.publicQuestion ? "practice" : "review");
   const input = {
@@ -736,13 +738,18 @@ export class LocalAgentRuntime {
     inspectAdapter = inspectEmployeeHostCompatibility,
     hostRegistry = createCoachAgentHostRegistry(),
     engineCatalog = COACH_ENGINE_CATALOG,
-    runnerFactory = ({ engine, hostRegistry: registry }) => new DigitalEmployeeHostRunner({
+    runnerFactory = ({ engine, hostRegistry: registry, directory }) => new DigitalEmployeeHostRunner({
       engine,
       hostRegistry: registry,
+      directory,
     }),
+    workspaceFactory = (options) => createLocalEmployeeWorkspace(options),
+    schemaValidatorsFactory = (options) => createEmployeeSchemaValidators(options),
     codexPersonalProbe = probeCodexPersonalMode,
-    codexPersonalRunnerFactory = ({ personalAuthConsent }) => new CodexPersonalRunner({
+    codexPersonalRunnerFactory = ({ personalAuthConsent, schemaValidators }) => new CodexPersonalRunner({
       personalAuthConsent,
+      validateInput: schemaValidators.validateEmployeeInput,
+      validateOutput: schemaValidators.validateEmployeeOutput,
       ...(process.env.SENIOR_ARCHITECT_CODEX_MODEL
         ? { model: process.env.SENIOR_ARCHITECT_CODEX_MODEL }
         : {}),
@@ -778,6 +785,8 @@ export class LocalAgentRuntime {
     if (typeof codexPersonalRunnerFactory !== "function") {
       throw new TypeError("codexPersonalRunnerFactory_required");
     }
+    if (typeof workspaceFactory !== "function") throw new TypeError("workspaceFactory_required");
+    if (typeof schemaValidatorsFactory !== "function") throw new TypeError("schemaValidatorsFactory_required");
     const normalizedCatalog = engineCatalog.map((entry) => {
       if (
         !entry
@@ -819,6 +828,8 @@ export class LocalAgentRuntime {
     this.engineCatalog = Object.freeze(normalizedCatalog);
     this.engineIds = new Set(normalizedCatalog.map(({ id }) => id));
     this.runnerFactory = runnerFactory;
+    this.workspaceFactory = workspaceFactory;
+    this.schemaValidatorsFactory = schemaValidatorsFactory;
     this.codexPersonalProbe = codexPersonalProbe;
     this.codexPersonalRunnerFactory = codexPersonalRunnerFactory;
     this.tokenFactory = tokenFactory;
@@ -829,6 +840,8 @@ export class LocalAgentRuntime {
     this.grantLifetimeMs = grantLifetimeMs;
     this.clock = clock;
     this.server = null;
+    this.workspace = null;
+    this.schemaValidators = null;
     this.canonicalDocsRoot = null;
     this.exactHost = null;
     this.origin = null;
@@ -849,56 +862,103 @@ export class LocalAgentRuntime {
       throw new TypeError("docsRoot_must_be_a_real_directory");
     }
     this.canonicalDocsRoot = await realpath(this.docsRoot);
-    const server = this.serverFactory((request, response) => {
-      this.#applyCorsHeaders(request, response);
-      this.#handle(request, response).catch((error) => {
-        if (!response.headersSent) {
-          const result = safeErrorResult(error);
-          sendJson(response, result.statusCode, result.body);
-        } else {
-          response.destroy();
-        }
-      });
-    });
-    server.headersTimeout = 10_000;
-    server.requestTimeout = 130_000;
-    server.keepAliveTimeout = 5_000;
-    await new Promise((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(this.port, LOOPBACK_HOST, () => {
-        server.off("error", reject);
-        resolve();
-      });
-    });
-    const address = server.address();
-    if (!address || typeof address === "string" || address.address !== LOOPBACK_HOST) {
-      await new Promise((resolve) => server.close(resolve));
-      throw new TypeError("runtime_failed_to_bind_ipv4_loopback");
+    const workspace = this.workspaceFactory({ directory: this.employeeDirectory });
+    if (
+      !workspace
+      || typeof workspace.prepare !== "function"
+      || typeof workspace.close !== "function"
+    ) {
+      throw new TypeError("workspaceFactory_invalid");
     }
-    this.server = server;
-    this.exactHost = `${LOOPBACK_HOST}:${address.port}`;
-    this.origin = `http://${this.exactHost}`;
-    return {
-      url: this.url,
-      public_url: this.publicCoachUrl,
-      host: LOOPBACK_HOST,
-      port: address.port,
-      protocol: LOOPBACK_PROTOCOL,
-    };
+    await workspace.prepare();
+    let schemaValidators;
+    try {
+      schemaValidators = this.schemaValidatorsFactory({ directory: workspace.directory });
+      if (
+        !schemaValidators
+        || typeof schemaValidators.prepare !== "function"
+        || typeof schemaValidators.validateEmployeeInput !== "function"
+        || typeof schemaValidators.validateEmployeeOutput !== "function"
+      ) {
+        throw new TypeError("schemaValidatorsFactory_invalid");
+      }
+      await schemaValidators.prepare();
+    } catch (error) {
+      await workspace.close().catch(() => {});
+      throw error;
+    }
+    this.workspace = workspace;
+    this.schemaValidators = schemaValidators;
+    let server;
+    try {
+      server = this.serverFactory((request, response) => {
+        this.#applyCorsHeaders(request, response);
+        this.#handle(request, response).catch((error) => {
+          if (!response.headersSent) {
+            const result = safeErrorResult(error);
+            sendJson(response, result.statusCode, result.body);
+          } else {
+            response.destroy();
+          }
+        });
+      });
+      server.headersTimeout = 10_000;
+      server.requestTimeout = 130_000;
+      server.keepAliveTimeout = 5_000;
+      await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(this.port, LOOPBACK_HOST, () => {
+          server.off("error", reject);
+          resolve();
+        });
+      });
+      const address = server.address();
+      if (!address || typeof address === "string" || address.address !== LOOPBACK_HOST) {
+        await new Promise((resolve) => server.close(resolve));
+        throw new TypeError("runtime_failed_to_bind_ipv4_loopback");
+      }
+      this.server = server;
+      this.exactHost = `${LOOPBACK_HOST}:${address.port}`;
+      this.origin = `http://${this.exactHost}`;
+      return {
+        url: this.url,
+        public_url: this.publicCoachUrl,
+        host: LOOPBACK_HOST,
+        port: address.port,
+        protocol: LOOPBACK_PROTOCOL,
+        workspace: this.workspace.binding,
+      };
+    } catch (error) {
+      if (server?.listening) {
+        await new Promise((resolve) => server.close(resolve)).catch(() => {});
+      }
+      this.workspace = null;
+      this.schemaValidators = null;
+      await workspace.close().catch(() => {});
+      throw error;
+    }
   }
 
   async stop() {
     const server = this.server;
-    if (!server) return;
+    const workspace = this.workspace;
     this.server = null;
+    this.workspace = null;
+    this.schemaValidators = null;
     this.bearerGrants.length = 0;
     this.idempotency.clear();
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-      server.closeIdleConnections?.();
-    });
-    this.exactHost = null;
-    this.origin = null;
+    try {
+      if (server) {
+        await new Promise((resolve, reject) => {
+          server.close((error) => (error ? reject(error) : resolve()));
+          server.closeIdleConnections?.();
+        });
+      }
+    } finally {
+      this.exactHost = null;
+      this.origin = null;
+      await workspace?.close();
+    }
   }
 
   async inspect(engine, { grant } = {}) {
@@ -918,7 +978,7 @@ export class LocalAgentRuntime {
     let inspection;
     try {
       inspection = await this.inspectAdapter({
-        directory: this.employeeDirectory,
+        directory: this.workspace.directory,
         engine,
         hostRegistry: this.hostRegistry,
       });
@@ -944,6 +1004,7 @@ export class LocalAgentRuntime {
         instance_id: this.instanceId,
         authentication: "bootstrap_required",
         agent_run_busy: this.runBusy,
+        workspace_status: this.workspace?.ready === true ? "ready" : "unavailable",
       });
       return;
     }
@@ -985,7 +1046,12 @@ export class LocalAgentRuntime {
       if (request.method !== "GET") throw requestError("METHOD_NOT_ALLOWED");
       const grant = this.#assertProtected(request);
       const adapters = await Promise.all(this.engineCatalog.map(({ id }) => this.inspect(id, { grant })));
-      sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapters });
+      sendJson(response, 200, {
+        schema_version: AGENT_CATALOG_SCHEMA,
+        protocol: LOOPBACK_PROTOCOL,
+        workspace: this.workspace.binding,
+        adapters,
+      });
       return;
     }
     if (pathname === "/v1/adapters/codex/personal-consent") {
@@ -1195,14 +1261,24 @@ export class LocalAgentRuntime {
   }
 
   async #runCoach(request, { grant } = {}) {
-    const { action, input } = await buildEmployeeInput(request);
+    const { action, input } = await buildEmployeeInput(
+      request,
+      this.schemaValidators.validateEmployeeInput,
+    );
     const adapter = await this.inspect(request.engine, { grant });
     if (!adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
     let output;
     try {
       const runner = request.engine === "codex"
-        ? this.codexPersonalRunnerFactory({ personalAuthConsent: grant?.codexPersonalConsent === true })
-        : this.runnerFactory({ engine: request.engine, hostRegistry: this.hostRegistry });
+        ? this.codexPersonalRunnerFactory({
+            personalAuthConsent: grant?.codexPersonalConsent === true,
+            schemaValidators: this.schemaValidators,
+          })
+        : this.runnerFactory({
+            engine: request.engine,
+            hostRegistry: this.hostRegistry,
+            directory: this.workspace.directory,
+          });
       if (!runner || typeof runner.preflight !== "function" || typeof runner.run !== "function") {
         throw new Error("invalid_runner");
       }
@@ -1212,7 +1288,7 @@ export class LocalAgentRuntime {
       throw requestError("AGENT_RUN_FAILED");
     }
     try {
-      await validateEmployeeOutput(output);
+      await this.schemaValidators.validateEmployeeOutput(output);
       validateTeachingOutput(output, {
         action,
         // Local validation identity is never included in employee input or API output.

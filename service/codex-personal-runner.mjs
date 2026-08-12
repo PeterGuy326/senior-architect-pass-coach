@@ -954,12 +954,17 @@ export class CodexPersonalRunner {
     maxPromptBytes = DEFAULT_PROMPT_LIMIT,
     model,
     personalAuthConsent = false,
+    validateInput = validateEmployeeInput,
+    validateOutput = validateEmployeeOutput,
   } = {}) {
     positiveInteger(deadlineMs, "deadlineMs", { minimum: 1_000, maximum: 900_000 });
     positiveInteger(maxStdoutBytes, "maxStdoutBytes");
     positiveInteger(maxStderrBytes, "maxStderrBytes");
     positiveInteger(maxPromptBytes, "maxPromptBytes");
     if (typeof command !== "string" || command.length === 0) throw new TypeError("command_required");
+    if (typeof validateInput !== "function" || typeof validateOutput !== "function") {
+      throw new TypeError("employee_schema_validators_required");
+    }
     if (model !== undefined && (typeof model !== "string" || model.trim().length === 0)) {
       throw new TypeError("model_must_be_nonempty_string");
     }
@@ -978,6 +983,8 @@ export class CodexPersonalRunner {
     this.maxPromptBytes = maxPromptBytes;
     this.model = model?.trim();
     this.personalAuthConsent = personalAuthConsent === true;
+    this.validateInput = validateInput;
+    this.validateOutput = validateOutput;
     this.probeState = null;
   }
 
@@ -1014,7 +1021,7 @@ export class CodexPersonalRunner {
         "使用本机 Codex 已保存登录态前，需要用户明确同意。",
       );
     }
-    await validateEmployeeInput(input);
+    await this.validateInput(input);
     if (!PERSONAL_ACTIONS.has(input.action)) {
       throw runnerError(
         "CODEX_PERSONAL_ACTION_UNSUPPORTED",
@@ -1068,7 +1075,7 @@ export class CodexPersonalRunner {
         ? renderSubmitPlan(input, modelOutput)
         : assertCodexCoachingText(modelOutput);
       const output = employeeOutputFromTrustedInput(input, coachingText);
-      await validateEmployeeOutput(output);
+      await this.validateOutput(output);
       return output;
     } catch (error) {
       primaryError = error;

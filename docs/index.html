@@ -228,22 +228,22 @@
     <dialog class="engine-dialog" id="engine-dialog" aria-labelledby="engine-dialog-title">
       <div class="engine-dialog__header">
         <div>
-          <p class="folio">讲解引擎</p>
-          <h2 id="engine-dialog-title">给私教换一支笔，不换学习档案</h2>
+          <p class="folio">Digital Employee 工作区</p>
+          <h2 id="engine-dialog-title">选择本机 Agent，作为私教大脑</h2>
         </div>
         <form method="dialog">
           <button class="dialog-close" type="submit" aria-label="关闭引擎选择">×</button>
         </form>
       </div>
       <p class="engine-dialog__intro" id="runtime-context">
-        基础私教始终可用。Agent 只接收当前公开题面、可信判分和去身份化进度摘要；切换引擎不会清空题目或学习记录。
+        Runtime 先锁定同一份私教员工包，再检测本机 Agent。Agent 只是可替换的大脑；题库、可信判分、行为信号和学习档案始终由浏览器 Harness 掌管。
       </p>
       <div class="runtime-callout" id="runtime-callout">
-        <p id="runtime-callout-copy">这是公开网页。只有你点击后，才会打开 127.0.0.1 的本机确认窗口；页面加载时不会扫描端口。</p>
+        <p id="runtime-callout-copy">这是公开网页。点击后先检测已运行的 Runtime；macOS 未运行时可唤起已安装应用，Linux 请先运行 start-local-coach。确认服务就绪后才打开 127.0.0.1 配对页，页面加载时不会扫描端口。</p>
         <a
           class="source-link"
           id="runtime-install-link"
-          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases"
+          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.6.0-preview.1"
           rel="noreferrer"
         >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
         <button class="secondary-action" id="runtime-connect" type="button">连接本机 Agent</button>
