@@ -409,6 +409,40 @@ test("closing the Runtime confirmation window fails fast and releases the pairin
   assert.equal(client.connected, false);
 });
 
+test("a valid pairing grant survives the popup closing while adapter discovery is slow", async () => {
+  const browser = pairingWindow();
+  let resolveCatalog;
+  const catalogPending = new Promise((resolve) => { resolveCatalog = resolve; });
+  const client = createLocalAgentClient({
+    fetchImpl: async () => {
+      await catalogPending;
+      return jsonResponse(catalogResponse([
+        { id: "codex", label: "Codex CLI", state: "consent_required", selectable: false },
+      ]));
+    },
+    idFactory: () => "slow-catalog-state-1234567890-abcdef",
+  });
+
+  const pending = client.pair({ windowRef: browser.windowRef, timeoutMs: 5_000 });
+  const pairUrl = new URL(browser.opened[0].url);
+  browser.dispatch({
+    type: "coach.runtime.grant",
+    protocol: LOOPBACK_PROTOCOL,
+    state: pairUrl.searchParams.get("state"),
+    access_token: "s".repeat(43),
+    instance_id: "slow-catalog-runtime",
+  });
+  browser.popup.closed = true;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(client.connected, true);
+  assert.equal(browser.listeners.size, 1);
+  resolveCatalog();
+  const connection = await pending;
+  assert.equal(connection.adapters[0].id, "codex");
+  assert.equal(browser.listeners.size, 0);
+  assert.equal(client.connected, true);
+});
+
 test("a running Runtime is probed and paired without invoking the launch scheme", async () => {
   const browser = pairingWindow();
   const token = "r".repeat(43);

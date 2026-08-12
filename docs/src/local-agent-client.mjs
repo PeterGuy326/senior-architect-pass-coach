@@ -545,6 +545,7 @@ export class LocalAgentClient {
 
     return new Promise((resolve, reject) => {
       let settled = false;
+      let grantAccepted = false;
       let popup = popupRef;
       let closePoll = null;
       const finish = (error, grant) => {
@@ -558,6 +559,7 @@ export class LocalAgentClient {
         else resolve(grant);
       };
       const onMessage = (event) => {
+        if (grantAccepted) return;
         if (event.source !== popup || event.origin !== this.#origin) return;
         const data = event.data;
         if (
@@ -574,6 +576,11 @@ export class LocalAgentClient {
         ) {
           finish(clientError("PAIRING_RESPONSE_INVALID", "本机 Runtime 返回了无效配对授权。"));
           return;
+        }
+        grantAccepted = true;
+        if (closePoll !== null) {
+          globalThis.clearInterval(closePoll);
+          closePoll = null;
         }
         this.#token = data.access_token;
         this.#instanceId = cleanText(data.instance_id, 128) || null;
