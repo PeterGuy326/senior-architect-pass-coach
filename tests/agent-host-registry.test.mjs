@@ -51,6 +51,8 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   );
   assert.doesNotMatch(entryConversationSource, /\.initialize\(|chat\.clear\(/u);
   assert.match(entryConversationSource, /chat\.setComposer\(\{[\s\S]*enabled:\s*true/u);
+  assert.match(source, /currentView\?\.state \?\? "ready"/u);
+  assert.match(source, /匿名 Agent 对话 · 尚未建立学习档案/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /confidence:\s*"auto"/u);
   assert.match(source, /confidence_source:\s*"inferred"/u);

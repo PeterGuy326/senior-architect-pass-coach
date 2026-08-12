@@ -512,7 +512,12 @@ function setOperating(value, message = "") {
       busy: BUSY_STATES.has(currentView?.state),
     });
     if (elements.statusLine.dataset.state === "busy") {
-      chat.setStatus(`本地档案 · revision ${currentView.revision ?? "—"}`, currentView.state);
+      chat.setStatus(
+        currentView
+          ? `本地档案 · revision ${currentView.revision ?? "—"}`
+          : "匿名 Agent 对话 · 尚未建立学习档案",
+        currentView?.state ?? "ready",
+      );
     }
   }
 }
