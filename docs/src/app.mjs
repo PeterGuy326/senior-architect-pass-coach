@@ -1,6 +1,9 @@
 import { createWebCoachHarness } from "./harness.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createResponseTimer } from "./response-behavior.mjs";
+import { HARNESS_ACTION_GROUPS } from "./harness-actions.mjs";
+import { dispatchHarnessAction } from "./harness-action-router.mjs";
+import { isDialogBackdropPoint, shouldDismissDialog } from "./dialog-interaction.mjs";
 import {
   createLocalAgentClient,
   DEFAULT_RUNTIME_ORIGIN,
@@ -39,6 +42,7 @@ const elements = Object.freeze({
   engineTrigger: document.querySelector("#engine-trigger"),
   engineTriggerLabel: document.querySelector("#engine-trigger-label"),
   engineDialog: document.querySelector("#engine-dialog"),
+  engineDialogClose: document.querySelector("#engine-dialog-close"),
   engineList: document.querySelector("#engine-list"),
   modelProfilePanel: document.querySelector("#model-profile-panel"),
   modelProfileList: document.querySelector("#model-profile-list"),
@@ -73,17 +77,7 @@ const chat = createChatView({
     responseTimer.recordAnswer(value);
     elements.input.focus();
   },
-  onSuggestion: async (suggestion) => {
-    if (suggestion && typeof suggestion === "object" && suggestion.id) {
-      const coach = await getCoach();
-      coach.acceptProactiveSuggestion(suggestion.id);
-      elements.input.value = "";
-      elements.input.placeholder = "回答刚才的主动追问；Enter 发送";
-      elements.input.focus({ preventScroll: true });
-      return;
-    }
-    await handleChatInput(String(suggestion || ""));
-  },
+  onSuggestion: async (actionId) => handleHarnessAction(actionId),
 });
 
 let coachPromise = null;
@@ -98,6 +92,9 @@ let selectedEngine = "content-only";
 let selectedModelPreference = null;
 let connectingRuntime = false;
 let restoringProfile = false;
+let dialogReturnFocus = null;
+let dialogFocusAfterClose = null;
+let pointerStartedOnBackdrop = false;
 
 const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
 const PUBLIC_COACH_PAGE = location.origin === PUBLIC_COACH_ORIGIN;
@@ -212,6 +209,42 @@ function agentChatAvailable() {
     selectedEngine !== "content-only" &&
     adapterById(selectedEngine)?.selectable === true,
   );
+}
+
+function dialogBusy() {
+  return connectingRuntime || operating;
+}
+
+function answerSurfaceVisible() {
+  return document.visibilityState !== "hidden" && document.hasFocus() && !elements.engineDialog.open;
+}
+
+function backdropPoint(event) {
+  return isDialogBackdropPoint({
+    targetIsDialog: event.target === elements.engineDialog,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    rect: elements.engineDialog.getBoundingClientRect(),
+  });
+}
+
+function syncDialogBusy() {
+  const busy = dialogBusy();
+  elements.engineDialog.setAttribute("aria-busy", busy ? "true" : "false");
+  elements.engineDialogClose.disabled = busy;
+}
+
+function requestEngineDialogClose({ focusTarget = null, force = false } = {}) {
+  if (!elements.engineDialog.open || (!force && dialogBusy())) return false;
+  dialogFocusAfterClose = focusTarget || dialogReturnFocus || elements.engineTrigger;
+  if (typeof elements.engineDialog.close === "function") elements.engineDialog.close();
+  else {
+    elements.engineDialog.removeAttribute("open");
+    responseTimer.setVisible(answerSurfaceVisible());
+    dialogFocusAfterClose?.focus?.({ preventScroll: true });
+    dialogFocusAfterClose = null;
+  }
+  return true;
 }
 
 function selectedAdapter() {
@@ -390,6 +423,7 @@ function renderEngineList() {
   const cards = visibleAdapters.map((adapter) => createEngineCard(adapter));
   elements.engineList.replaceChildren(contentOnly, ...cards);
   updateEngineUi();
+  syncDialogBusy();
 }
 
 function adapterDiagnostic(adapter) {
@@ -400,20 +434,24 @@ function adapterDiagnostic(adapter) {
 }
 
 async function enterAgentConversation(engine) {
-  if (elements.engineDialog.open && typeof elements.engineDialog.close === "function") {
-    elements.engineDialog.close();
-  } else {
-    elements.engineDialog.removeAttribute("open");
-  }
-  chat.appendSystem(`${engineDisplayName(engine)} 已接入。现在可以直接输入问题；选择 Agent 不会自动发送消息。`);
+  requestEngineDialogClose({ focusTarget: elements.input });
+  const answering = currentView?.state === "awaiting_answer";
+  chat.appendCoach([
+    answering
+      ? `${engineDisplayName(engine)} 已接入。请先完成当前题；作答前 Agent 不会介入题面。`
+      : `${engineDisplayName(engine)} 已接入。可以直接点下面的选项继续；开放式问题仍可在输入框里补充。`,
+  ], {
+    annotation: "快捷选项由浏览器 Harness 固定提供，Agent 不能自行注入按钮或命令。",
+    suggestions: answering ? HARNESS_ACTION_GROUPS.awaiting_answer : HARNESS_ACTION_GROUPS.agent_entry,
+  });
   chat.setComposer({
     enabled: true,
-    answering: currentView?.state === "awaiting_answer",
+    answering,
   });
   elements.input.focus({ preventScroll: true });
 }
 
-async function selectEngine(engine, { enterConversation = engine !== "content-only" } = {}) {
+async function selectEngine(engine, { enterConversation = true } = {}) {
   if (operating || connectingRuntime) return;
   if (engine !== "content-only") {
     let adapter = adapterById(engine);
@@ -470,7 +508,13 @@ async function selectEngine(engine, { enterConversation = engine !== "content-on
     coach.setAgentModelPreference(selectedModelPreference);
   }
   updateEngineUi(`已选择：${engineDisplayName()}。学习档案、当前题目和进度均未改变。`);
-  if (enterConversation && engine !== "content-only") await enterAgentConversation(engine);
+  if (engine === "content-only") {
+    requestEngineDialogClose({ focusTarget: elements.input });
+    chat.appendSystem("已切回基础私教。固定题库、判分、计时和学习档案继续由浏览器 Harness 掌管。");
+    chat.setComposer({ enabled: initialized, answering: currentView?.state === "awaiting_answer" });
+  } else if (enterConversation) {
+    await enterAgentConversation(engine);
+  }
   return true;
 }
 
@@ -569,14 +613,42 @@ function updateRuntimeCallout() {
 function setupEngineControls() {
   updateRuntimeCallout();
   elements.engineTrigger.addEventListener("click", () => {
+    dialogReturnFocus = document.activeElement;
+    dialogFocusAfterClose = null;
     responseTimer.setVisible(false);
     if (typeof elements.engineDialog.showModal === "function") elements.engineDialog.showModal();
     else elements.engineDialog.setAttribute("open", "");
+    syncDialogBusy();
   });
   elements.engineDialog.addEventListener("close", () => {
-    responseTimer.setVisible(document.visibilityState !== "hidden" && document.hasFocus());
+    responseTimer.setVisible(answerSurfaceVisible());
+    const focusTarget = dialogFocusAfterClose || dialogReturnFocus || elements.engineTrigger;
+    dialogFocusAfterClose = null;
+    pointerStartedOnBackdrop = false;
+    globalThis.requestAnimationFrame?.(() => focusTarget?.focus?.({ preventScroll: true }));
   });
-  elements.engineDialog.addEventListener("cancel", () => responseTimer.setVisible(false));
+  elements.engineDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    if (!requestEngineDialogClose()) {
+      elements.engineDialogStatus.textContent = "当前连接或请求仍在处理中，请稍候。";
+    }
+  });
+  elements.engineDialogClose.addEventListener("click", () => requestEngineDialogClose());
+  elements.engineDialog.addEventListener("pointerdown", (event) => {
+    pointerStartedOnBackdrop = backdropPoint(event);
+  });
+  elements.engineDialog.addEventListener("pointercancel", () => {
+    pointerStartedOnBackdrop = false;
+  });
+  elements.engineDialog.addEventListener("click", (event) => {
+    const dismiss = shouldDismissDialog({
+      busy: dialogBusy(),
+      pointerStartedOnBackdrop,
+      pointerEndedOnBackdrop: backdropPoint(event),
+    });
+    pointerStartedOnBackdrop = false;
+    if (dismiss) requestEngineDialogClose();
+  });
   elements.runtimeConnect.addEventListener("click", () => { void connectRuntime(); });
   renderEngineList();
 }
@@ -632,6 +704,7 @@ function setOperating(value, message = "") {
   for (const button of elements.modelProfileList.querySelectorAll("button[data-model-preference]")) {
     button.disabled = value;
   }
+  syncDialogBusy();
   if (value) {
     chat.setComposer({ enabled: initialized, busy: true });
     chat.setStatus(message || "正在处理……", "busy");
@@ -945,16 +1018,9 @@ async function askAgent(raw) {
     process.advance("contract", "已收到回复；正在校验边界并准备展示");
     chat.appendCoach([result.coaching_text], {
       annotation: `讲解引擎 ${result.engine}${result.model_preference ? ` · ${result.model_preference}` : selectedModelProfile()?.label ? ` · ${selectedModelProfile().label}` : ""} · 本次对话不写入学习进度`,
-      suggestions: [
-        {
-          label: "让私教反问我",
-          value: "请基于刚才的回答，主动问我一个能判断是否真正掌握的关键问题。",
-        },
-        {
-          label: "安排专项训练",
-          value: "请根据刚才暴露的不足，为我安排一个最小专项训练，并先问第一个问题。",
-        },
-      ],
+      suggestions: currentView?.state === "feedback"
+        ? HARNESS_ACTION_GROUPS.agent_reply_feedback
+        : HARNESS_ACTION_GROUPS.agent_reply,
     });
     return null;
   }, {
@@ -972,6 +1038,22 @@ async function askAgent(raw) {
         { id: "contract", label: "校验回复并展示" },
       ],
     },
+  });
+}
+
+async function handleHarnessAction(actionId) {
+  return dispatchHarnessAction(actionId, {
+    operating,
+    state: currentView?.state,
+    agentAvailable: agentChatAvailable(),
+    onLearnerChoice: (label) => chat.appendLearner(label),
+    runCommand: handleCommand,
+    focusAnswer: () => elements.input.focus({ preventScroll: true }),
+    askAgent,
+    onBlocked: (message) => chat.appendSystem(message),
+    onDisconnected: () => chat.appendCoach([
+      "当前 Agent 已断开。请重新选择一个可用 Agent；学习档案没有变化。",
+    ], { error: true }),
   });
 }
 
@@ -1095,10 +1177,10 @@ elements.input.addEventListener("input", () => {
   }
 });
 document.addEventListener("visibilitychange", () => {
-  responseTimer.setVisible(document.visibilityState !== "hidden" && document.hasFocus());
+  responseTimer.setVisible(answerSurfaceVisible());
 });
 window.addEventListener("blur", () => responseTimer.setVisible(false));
-window.addEventListener("focus", () => responseTimer.setVisible(document.visibilityState !== "hidden"));
+window.addEventListener("focus", () => responseTimer.setVisible(answerSurfaceVisible()));
 elements.input.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();

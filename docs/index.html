@@ -211,15 +211,13 @@
       </aside>
     </main>
 
-    <dialog class="engine-dialog" id="engine-dialog" aria-labelledby="engine-dialog-title">
+    <dialog class="engine-dialog" id="engine-dialog" aria-labelledby="engine-dialog-title" aria-describedby="runtime-context engine-dialog-status" aria-busy="false">
       <div class="engine-dialog__header">
         <div>
           <p class="folio">Digital Employee 工作区</p>
           <h2 id="engine-dialog-title">选择本机 Agent，作为私教大脑</h2>
         </div>
-        <form method="dialog">
-          <button class="dialog-close" type="submit" aria-label="关闭引擎选择">×</button>
-        </form>
+        <button class="dialog-close" id="engine-dialog-close" type="button" aria-label="关闭引擎选择">×</button>
       </div>
       <p class="engine-dialog__intro" id="runtime-context">
         直接点击想用的 Agent。页面会在这次点击内唤起并连接 Runtime，验证它与私教员工包兼容后自动进入对话。Agent 只是可替换的大脑；题库、可信判分、行为信号和学习档案始终由浏览器 Harness 掌管。
