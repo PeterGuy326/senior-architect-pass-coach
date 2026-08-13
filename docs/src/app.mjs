@@ -40,6 +40,8 @@ const elements = Object.freeze({
   engineTriggerLabel: document.querySelector("#engine-trigger-label"),
   engineDialog: document.querySelector("#engine-dialog"),
   engineList: document.querySelector("#engine-list"),
+  modelProfilePanel: document.querySelector("#model-profile-panel"),
+  modelProfileList: document.querySelector("#model-profile-list"),
   engineDialogStatus: document.querySelector("#engine-dialog-status"),
   runtimeConnect: document.querySelector("#runtime-connect"),
   runtimeInstallLink: document.querySelector("#runtime-install-link"),
@@ -71,6 +73,17 @@ const chat = createChatView({
     responseTimer.recordAnswer(value);
     elements.input.focus();
   },
+  onSuggestion: async (suggestion) => {
+    if (suggestion && typeof suggestion === "object" && suggestion.id) {
+      const coach = await getCoach();
+      coach.acceptProactiveSuggestion(suggestion.id);
+      elements.input.value = "";
+      elements.input.placeholder = "回答刚才的主动追问；Enter 发送";
+      elements.input.focus({ preventScroll: true });
+      return;
+    }
+    await handleChatInput(String(suggestion || ""));
+  },
 });
 
 let coachPromise = null;
@@ -82,6 +95,7 @@ let localAgentClient = null;
 let runtimeAdapters = [];
 let runtimeWorkspace = null;
 let selectedEngine = "content-only";
+let selectedModelPreference = null;
 let connectingRuntime = false;
 let restoringProfile = false;
 
@@ -200,6 +214,76 @@ function agentChatAvailable() {
   );
 }
 
+function selectedAdapter() {
+  return adapterById(selectedEngine);
+}
+
+function selectedModelProfile() {
+  return selectedAdapter()?.model_preferences?.find((profile) => profile.id === selectedModelPreference) || null;
+}
+
+function renderModelProfiles() {
+  const adapter = selectedAdapter();
+  const profiles = adapter?.id === "codex"
+    ? (adapter.model_preferences || []).filter((profile) => profile.selectable === true)
+    : [];
+  elements.modelProfilePanel.hidden = profiles.length === 0;
+  if (!profiles.length) {
+    elements.modelProfileList.replaceChildren();
+    selectedModelPreference = null;
+    return;
+  }
+  if (!profiles.some((profile) => profile.id === selectedModelPreference)) {
+    selectedModelPreference = adapter.default_model_preference || profiles[0].id;
+  }
+  const descriptions = Object.freeze({
+    fast: "短问短答优先 · 本机 Runtime 已核验",
+    balanced: "速度与分析平衡 · 本机 Runtime 已核验",
+    deep: "复杂追问优先 · 本机 Runtime 已核验",
+  });
+  const cards = profiles.map((profile) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "model-profile-card";
+    button.dataset.modelPreference = profile.id;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", profile.id === selectedModelPreference ? "true" : "false");
+    button.tabIndex = profile.id === selectedModelPreference ? 0 : -1;
+    button.disabled = operating;
+    const title = document.createElement("strong");
+    title.textContent = profile.label;
+    const detail = document.createElement("small");
+    detail.textContent = descriptions[profile.id] || "本机 Runtime 已核验";
+    button.append(title, detail);
+    button.addEventListener("click", () => {
+      selectedModelPreference = profile.id;
+      if (coachPromise) {
+        void coachPromise.then((coach) => coach.setAgentModelPreference(profile.id));
+      }
+      renderModelProfiles();
+      updateEngineUi(`已选择 ${engineDisplayName()} · ${profile.label}；从下一轮开始生效，学习档案不变。`);
+      elements.modelProfileList.querySelector(`[data-model-preference="${profile.id}"]`)?.focus({ preventScroll: true });
+    });
+    button.addEventListener("keydown", (event) => {
+      if (!new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]).has(event.key)) return;
+      event.preventDefault();
+      const current = profiles.findIndex((candidate) => candidate.id === profile.id);
+      const target = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? profiles.length - 1
+          : (current + (new Set(["ArrowLeft", "ArrowUp"]).has(event.key) ? -1 : 1) + profiles.length) % profiles.length;
+      selectedModelPreference = profiles[target].id;
+      if (coachPromise) void coachPromise.then((coach) => coach.setAgentModelPreference(selectedModelPreference));
+      renderModelProfiles();
+      elements.modelProfileList.querySelector(`[data-model-preference="${selectedModelPreference}"]`)?.focus({ preventScroll: true });
+      updateEngineUi(`已选择 ${engineDisplayName()} · ${profiles[target].label}；从下一轮开始生效，学习档案不变。`);
+    });
+    return button;
+  });
+  elements.modelProfileList.replaceChildren(...cards);
+}
+
 const RUNTIME_SESSION_LOSS_CODES = new Set([
   "RUNTIME_NOT_CONNECTED",
   "RUNTIME_UNREACHABLE",
@@ -212,11 +296,13 @@ async function resetLostRuntimeConnection() {
   runtimeAdapters = [];
   runtimeWorkspace = null;
   selectedEngine = "content-only";
+  selectedModelPreference = null;
   if (coachPromise) {
     try {
       const coach = await coachPromise;
       coach.setAgentClient(null);
       coach.setAgentPreference("content-only");
+      coach.setAgentModelPreference(null);
     } catch {
       // A failed Harness initialization must not prevent the connection UI
       // from returning to the safe, retryable content-only state.
@@ -245,6 +331,7 @@ function updateEngineUi(message = "") {
   for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
     button.setAttribute("aria-pressed", button.dataset.engine === selectedEngine ? "true" : "false");
   }
+  renderModelProfiles();
   if (initialized && currentView && !BUSY_STATES.has(currentView.state)) {
     chat.setComposer({ enabled: true, answering: currentView.state === "awaiting_answer" });
   }
@@ -372,9 +459,14 @@ async function selectEngine(engine, { enterConversation = engine !== "content-on
     }
   }
   selectedEngine = engine;
+  const selected = adapterById(engine);
+  selectedModelPreference = engine === "codex"
+    ? (selected?.default_model_preference || selected?.model_preferences?.find((profile) => profile.selectable)?.id || null)
+    : null;
   if (coachPromise) {
     const coach = await coachPromise;
     coach.setAgentPreference(engine);
+    coach.setAgentModelPreference(selectedModelPreference);
   }
   updateEngineUi(`已选择：${engineDisplayName()}。学习档案、当前题目和进度均未改变。`);
   if (enterConversation && engine !== "content-only") await enterAgentConversation(engine);
@@ -388,6 +480,7 @@ async function connectRuntime({ preferredEngine = null } = {}) {
     adapters: runtimeAdapters,
     workspace: runtimeWorkspace,
     engine: selectedEngine,
+    modelPreference: selectedModelPreference,
   });
   let newClient = null;
   let connected = false;
@@ -417,7 +510,9 @@ async function connectRuntime({ preferredEngine = null } = {}) {
     const coach = await getCoach();
     coach.setAgentClient(newClient);
     selectedEngine = "content-only";
+    selectedModelPreference = null;
     coach.setAgentPreference(selectedEngine);
+    coach.setAgentModelPreference(null);
     connected = true;
     completionMessage = preferredEngine
       ? "本机 Runtime 已连接，正在验证你选择的 Agent……"
@@ -428,6 +523,7 @@ async function connectRuntime({ preferredEngine = null } = {}) {
     runtimeAdapters = previous.adapters;
     runtimeWorkspace = previous.workspace;
     selectedEngine = previous.engine;
+    selectedModelPreference = previous.modelPreference;
     completionMessage = safeMessage(error, "本机 Runtime 连接失败；基础私教不受影响。");
   } finally {
     connectingRuntime = false;
@@ -498,6 +594,9 @@ function syncResponseTimer(view) {
 }
 
 function updateFromView(view) {
+  if (view?.agent?.model_preference !== undefined) {
+    selectedModelPreference = view.agent.model_preference;
+  }
   currentView = view;
   chat.renderState(view);
   syncResponseTimer(view);
@@ -509,6 +608,7 @@ async function getCoach() {
       .then((coach) => {
         if (localAgentClient?.connected) coach.setAgentClient(localAgentClient);
         coach.setAgentPreference(selectedEngine);
+        coach.setAgentModelPreference(selectedModelPreference);
         unsubscribe = coach.subscribe(updateFromView);
         return coach;
       })
@@ -527,6 +627,9 @@ function setOperating(value, message = "") {
   for (const button of elements.engineList.querySelectorAll("button[data-engine]")) {
     const unavailable = button.dataset.engineActionable !== "true";
     button.disabled = value || connectingRuntime || unavailable;
+  }
+  for (const button of elements.modelProfileList.querySelectorAll("button[data-model-preference]")) {
+    button.disabled = value;
   }
   if (value) {
     chat.setComposer({ enabled: initialized, busy: true });
@@ -548,23 +651,26 @@ function setOperating(value, message = "") {
   }
 }
 
-async function operate(message, action) {
+async function operate(message, action, { process: processSpec = null } = {}) {
   if (operating) {
     chat.appendSystem("上一条指令还在处理，请稍等。");
     return null;
   }
   setOperating(true, message);
   elements.answerError.textContent = "";
+  const process = processSpec ? chat.startProcess(processSpec) : null;
   try {
-    const result = await action();
+    const result = await action({ process });
     if (result && typeof result === "object" && typeof result.state === "string") {
       updateFromView(result);
       if (RUNTIME_SESSION_LOSS_CODES.has(result?.agent?.failure?.code)) {
         await resetLostRuntimeConnection();
       }
     }
+    process?.complete(processSpec?.completeLabel || "执行完成");
     return result;
   } catch (error) {
+    process?.fail(processSpec?.failureLabel || "执行中止 · 未写入学习进度");
     if (RUNTIME_SESSION_LOSS_CODES.has(error?.code)) {
       await resetLostRuntimeConnection();
     }
@@ -654,15 +760,45 @@ async function submitAnswer(answer) {
     : null;
   chat.appendLearner(answer.response);
   resetAnswerControls();
-  await operate("正在按固定答案键批改……", async () => {
+  const agentActive = agentChatAvailable();
+  await operate("正在按固定答案键批改……", async ({ process }) => {
     const coach = await getCoach();
-    return coach.answer({
+    const result = await coach.answer({
       response: answer.response,
       confidence: "auto",
       behavior,
       expectedRevision: currentView.revision,
       expectedItemId: currentView.question.item_id,
+      onPhase(phase) {
+        if (phase === "grading") process.advance("grade", "正在读取密封答案键");
+        if (phase === "committing") process.advance("commit", "正在原子提交固定判分与行为证据");
+        if (phase === "agent" && agentActive) process.advance("agent", `可信进度已提交；正在等待 ${engineDisplayName()}`);
+        if (phase === "validating") process.advance("contract", "正在校验员工输出并生成可见视图");
+      },
     });
+    if (result?.agent?.failure) {
+      process.complete("固定判分已保存 · Agent 讲解失败，可重连后继续", { throughId: "commit" });
+    } else {
+      process.advance("contract", agentActive
+        ? "已收到经员工契约校验的讲解；固定判分不会被模型覆盖"
+        : "固定答案判分和进度提交均已完成");
+    }
+    return result;
+  }, {
+    process: {
+      title: agentActive ? `${engineDisplayName()} · 批改与讲解执行笺` : "基础私教 · 批改执行笺",
+      engine: agentActive
+        ? `${selectedModelProfile()?.label || "Runtime 默认档位"} · 判分先于 Agent`
+        : "固定答案键 · 浏览器本地 Harness",
+      completeLabel: agentActive ? "固定判分已保存 · Agent 讲解已收口" : "固定判分与进度已保存",
+      failureLabel: "本轮执行中止 · 未完成的步骤没有写入进度",
+      stages: [
+        { id: "grade", label: "固定答案键判分", detail: "模型无权决定对错" },
+        { id: "commit", label: "原子提交学习证据" },
+        ...(agentActive ? [{ id: "agent", label: `等待 ${engineDisplayName()} 补充讲解` }] : []),
+        { id: "contract", label: "校验并展示最终结果" },
+      ],
+    },
   });
 }
 
@@ -800,13 +936,41 @@ function showHelp() {
 }
 
 async function askAgent(raw) {
-  await operate(`正在请 ${engineDisplayName()} 结合你的弱项回答……`, async () => {
+  const engine = engineDisplayName();
+  await operate(`正在请 ${engine} 结合你的弱项回答……`, async ({ process }) => {
     const coach = await getCoach();
+    process.advance("agent", "请求已交给本机 Runtime；页面正在等待结构化回复");
     const result = await coach.askAgent(raw);
+    process.advance("contract", "已收到回复；正在校验边界并准备展示");
     chat.appendCoach([result.coaching_text], {
-      annotation: `讲解引擎 ${result.engine} · 本次对话不写入学习进度`,
+      annotation: `讲解引擎 ${result.engine}${result.model_preference ? ` · ${result.model_preference}` : selectedModelProfile()?.label ? ` · ${selectedModelProfile().label}` : ""} · 本次对话不写入学习进度`,
+      suggestions: [
+        {
+          label: "让私教反问我",
+          value: "请基于刚才的回答，主动问我一个能判断是否真正掌握的关键问题。",
+        },
+        {
+          label: "安排专项训练",
+          value: "请根据刚才暴露的不足，为我安排一个最小专项训练，并先问第一个问题。",
+        },
+      ],
     });
     return null;
+  }, {
+    process: {
+      title: `${engine} · 执行笺`,
+      engine: "本机 Agent 调用 · 学习进度只读",
+      completeLabel: `${engine} · 回复已完成`,
+      stages: [
+        {
+          id: "context",
+          label: "准备允许字段",
+          detail: "仅在浏览器内整理当前教学上下文，不发送身份与本地路径",
+        },
+        { id: "agent", label: `等待 ${engine} 返回` },
+        { id: "contract", label: "校验回复并展示" },
+      ],
+    },
   });
 }
 

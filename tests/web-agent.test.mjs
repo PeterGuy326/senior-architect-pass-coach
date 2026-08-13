@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createMemoryCoachStore } from "../docs/src/indexeddb-store.mjs";
-import { buildTimingReceipt } from "../docs/src/chat-view.mjs";
+import { buildProcessStageSnapshot, buildTimingReceipt } from "../docs/src/chat-view.mjs";
 import { createBrowserCoach } from "../docs/src/harness.mjs";
 import {
   DEFAULT_RUNTIME_ORIGIN,
@@ -25,6 +25,26 @@ const TEST_WORKSPACE = Object.freeze({
   }),
   memory_owner: "browser_harness",
   agent_role: "replaceable_brain",
+});
+
+test("execution ledger exposes only bounded verifiable stage states", () => {
+  assert.deepEqual(buildProcessStageSnapshot(3, 0), {
+    activeIndex: 0,
+    settled: false,
+    states: ["active", "pending", "pending"],
+  });
+  assert.deepEqual(buildProcessStageSnapshot(3, 1), {
+    activeIndex: 1,
+    settled: false,
+    states: ["done", "active", "pending"],
+  });
+  assert.deepEqual(buildProcessStageSnapshot(3, 1, "error"), {
+    activeIndex: 1,
+    settled: true,
+    states: ["done", "error", "pending"],
+  });
+  assert.deepEqual(buildProcessStageSnapshot(3, 2, "done").states, ["done", "done", "done"]);
+  assert.throws(() => buildProcessStageSnapshot(6), /between 1 and 5/u);
 });
 
 test("timing receipt makes the automatic time calculation explicit", () => {
@@ -1103,4 +1123,81 @@ test("free-form Agent chat is bounded and does not write learner progress", asyn
   assert.equal(payload.message, "今天先补哪块？");
   assert.equal(reply.coaching_text.length, 2_000);
   assert.equal(JSON.stringify(payload).includes("principal_id"), false);
+});
+
+test("Harness forwards only the selected opaque model preference and emits bounded proactive prompts", async () => {
+  let payload;
+  const agentClient = {
+    connected: true,
+    coach: async (value) => {
+      payload = value;
+      return { coaching_text: "先做一次概念边界复述。", engine: "codex", model_preference: "fast" };
+    },
+  };
+  const { coach } = await createCoach({ agentClient, agentEngine: "codex" });
+  coach.setAgentModelPreference("fast");
+  await coach.initialize();
+  const question = await coach.start();
+  const phases = [];
+  const feedback = await coach.answer({
+    response: "A",
+    confidence: "sure",
+    expectedRevision: question.revision,
+    expectedItemId: question.question.item_id,
+    onPhase: (phase) => {
+      phases.push(phase);
+      // A user may switch the UI preference while this turn is running. The
+      // in-flight request must keep the profile captured when answer() began.
+      if (phase === "agent") coach.setAgentModelPreference("deep");
+    },
+  });
+  assert.equal(payload.modelPreference, "fast");
+  assert.equal(JSON.stringify(payload).includes("gpt-5.6"), false);
+  assert.deepEqual(phases, ["grading", "committing", "agent", "validating"]);
+  assert.equal(feedback.agent.coaching.model_preference, "fast");
+  assert.equal(feedback.agent.model_preference, "deep");
+  assert.equal(coach.getAgentModelPreference(), "deep");
+  assert.ok(feedback.agent.proactive_suggestions.length <= 2);
+  assert.ok(feedback.agent.proactive_suggestions.every((suggestion) => (
+    /^[a-z0-9_-]+$/u.test(suggestion.id)
+    && /^[a-z0-9_]+$/u.test(suggestion.reason_code)
+    && typeof suggestion.prompt === "string"
+    && suggestion.prompt.length <= 120
+  )));
+  const proactive = feedback.agent.proactive_suggestions[0];
+  if (proactive) {
+    await coach.askAgent("这是我的判断依据。 ");
+    assert.match(payload.message, /^私教刚才问：/u);
+    assert.match(payload.message, /学习者回答：这是我的判断依据。/u);
+    assert.equal(coach.pendingProactiveQuestion, null);
+    await coach.askAgent("再补一个普通问题。");
+    assert.equal(payload.message, "再补一个普通问题。");
+  }
+  assert.equal((await coach.exportData()).attempts.length, 1);
+});
+
+test("a throwing presentation subscriber cannot rewind a committed answer", async () => {
+  let agentCalls = 0;
+  const agentClient = {
+    connected: true,
+    async coach() {
+      agentCalls += 1;
+      return { coaching_text: "稳定返回。", engine: "qwen-code" };
+    },
+  };
+  const { coach } = await createCoach({ agentClient, agentEngine: "qwen-code" });
+  await coach.initialize();
+  const question = await coach.start();
+  coach.subscribe(() => { throw new Error("presentation failed"); });
+  const feedback = await coach.answer({
+    response: "B",
+    confidence: "auto",
+    expectedRevision: question.revision,
+    expectedItemId: question.question.item_id,
+  });
+  const exported = await coach.exportData();
+  assert.equal(feedback.state, "feedback");
+  assert.equal(exported.attempts.length, 1);
+  assert.equal(agentCalls, 1);
+  assert.ok(feedback.revision > question.revision);
 });

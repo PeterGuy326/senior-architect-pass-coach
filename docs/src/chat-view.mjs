@@ -15,6 +15,20 @@ const ACTIVE_STATES = new Set(["ready", "awaiting_answer", "feedback", "complete
 const BUSY_STATES = new Set(["loading", "generating_question", "evaluating"]);
 const REDUCED_MOTION = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 
+export function buildProcessStageSnapshot(stageCount, activeIndex = 0, outcome = "running") {
+  if (!Number.isSafeInteger(stageCount) || stageCount < 1 || stageCount > 5) {
+    throw new RangeError("stageCount must be between 1 and 5");
+  }
+  const index = clamp(Number.isSafeInteger(activeIndex) ? activeIndex : 0, 0, stageCount - 1);
+  const states = Array.from({ length: stageCount }, (_value, stageIndex) => {
+    if (outcome === "done") return "done";
+    if (stageIndex < index) return "done";
+    if (stageIndex === index) return outcome === "error" ? "error" : "active";
+    return "pending";
+  });
+  return Object.freeze({ activeIndex: index, settled: outcome !== "running", states: Object.freeze(states) });
+}
+
 function node(tag, className, text) {
   const element = document.createElement(tag);
   if (className) element.className = className;
@@ -206,16 +220,18 @@ export function createChatView({
   evidenceBadge,
   statusLine,
   onOption,
+  onSuggestion,
 }) {
   if (!(timeline instanceof HTMLElement)) throw new TypeError("timeline is required");
 
   const renderedKeys = new Set();
   const renderedAgentKeys = new Set();
+  const activeProcessTimers = new Set();
   let selected = new Set();
   let currentQuestion = null;
   let agentChatAvailable = false;
 
-  function appendMessage(role, { paragraphs = [], question, timing, annotation, action } = {}) {
+  function appendMessage(role, { paragraphs = [], question, timing, annotation, action, suggestions = [] } = {}) {
     const item = node("li", `message message--${role}`);
     const byline = node("div", "message__byline");
     const chop = node("span", "teacher-chop", role === "learner" ? "我" : role === "system" ? "记" : "师");
@@ -271,6 +287,24 @@ export function createChatView({
       paper.append(button);
     }
 
+    const safeSuggestions = (Array.isArray(suggestions) ? suggestions : [])
+      .filter((suggestion) => asText(suggestion?.label) && asText(suggestion?.value))
+      .slice(0, 3);
+    if (safeSuggestions.length && typeof onSuggestion === "function") {
+      const suggestionGroup = node("div", "coach-suggestions");
+      suggestionGroup.setAttribute("aria-label", "私教建议追问");
+      for (const suggestion of safeSuggestions) {
+        const button = node("button", "coach-suggestion", suggestion.label);
+        button.type = "button";
+        button.addEventListener("click", () => {
+          for (const peer of suggestionGroup.querySelectorAll("button")) peer.disabled = true;
+          onSuggestion(suggestion.value);
+        }, { once: true });
+        suggestionGroup.append(button);
+      }
+      paper.append(suggestionGroup);
+    }
+
     item.append(byline, paper);
     timeline.append(item);
     item.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION ? "auto" : "smooth" });
@@ -289,7 +323,126 @@ export function createChatView({
     return appendMessage("system", { paragraphs: [text] });
   }
 
+  function startProcess({ title = "本机执行笺", engine = "", stages = [] } = {}) {
+    const normalizedStages = (Array.isArray(stages) ? stages : [])
+      .map((stage, index) => ({
+        id: asText(stage?.id, `stage-${index + 1}`),
+        label: asText(stage?.label, `执行节点 ${index + 1}`),
+        detail: asText(stage?.detail),
+      }))
+      .slice(0, 5);
+    if (!normalizedStages.length) {
+      normalizedStages.push({ id: "running", label: "请求处理中", detail: "" });
+    }
+
+    const startedAt = globalThis.performance?.now?.() ?? Date.now();
+    const item = node("li", "message message--process");
+    const byline = node("div", "message__byline");
+    const chop = node("span", "teacher-chop", "执");
+    chop.setAttribute("aria-hidden", "true");
+    byline.append(chop, node("span", "", "执行笺"));
+
+    const paper = node("section", "message__paper process-ledger");
+    paper.setAttribute("aria-label", title);
+    const heading = node("div", "process-ledger__heading");
+    const titleNode = node("strong", "process-ledger__title", title);
+    const elapsedNode = node("span", "process-ledger__elapsed", "0.0 秒");
+    elapsedNode.setAttribute("aria-hidden", "true");
+    heading.append(titleNode, elapsedNode);
+    const engineNode = engine ? node("p", "process-ledger__engine", engine) : null;
+    const list = node("ol", "process-ledger__stages");
+    const stageRows = normalizedStages.map((stage, index) => {
+      const row = node("li", "process-stage");
+      row.dataset.state = index === 0 ? "active" : "pending";
+      row.dataset.processStage = stage.id;
+      const mark = node("span", "process-stage__mark", index === 0 ? "进行" : String(index + 1).padStart(2, "0"));
+      mark.setAttribute("aria-hidden", "true");
+      const copy = node("span", "process-stage__copy");
+      copy.append(node("strong", "", stage.label));
+      if (stage.detail) copy.append(node("small", "", stage.detail));
+      row.append(mark, copy);
+      list.append(row);
+      return { ...stage, row, mark, copy };
+    });
+    const boundary = node("p", "process-ledger__boundary", "仅展示可验证的执行节点，不展示模型内部思维链。");
+    paper.append(heading, engineNode, list, boundary);
+    item.append(byline, paper);
+    timeline.append(item);
+    item.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION ? "auto" : "smooth" });
+
+    let settled = false;
+    let activeIndex = 0;
+    const elapsed = () => Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - startedAt);
+    const renderElapsed = () => {
+      elapsedNode.textContent = `${(elapsed() / 1_000).toFixed(1)} 秒`;
+    };
+    const timer = globalThis.setInterval(renderElapsed, 100);
+    activeProcessTimers.add(timer);
+
+    function stopTimer() {
+      globalThis.clearInterval(timer);
+      activeProcessTimers.delete(timer);
+      renderElapsed();
+    }
+
+    function setStageState(index, state, detail = "") {
+      const stage = stageRows[index];
+      if (!stage) return;
+      stage.row.dataset.state = state;
+      stage.mark.textContent = state === "done" ? "成" : state === "active" ? "进行" : state === "error" ? "止" : String(index + 1).padStart(2, "0");
+      if (detail) {
+        let detailNode = stage.copy.querySelector("small");
+        if (!detailNode) {
+          detailNode = node("small");
+          stage.copy.append(detailNode);
+        }
+        detailNode.textContent = detail;
+      }
+    }
+
+    function applySnapshot(snapshot, detail = "") {
+      snapshot.states.forEach((state, index) => setStageState(index, state, index === snapshot.activeIndex ? detail : ""));
+    }
+
+    function advance(id, detail = "") {
+      if (settled) return;
+      const targetIndex = stageRows.findIndex((stage) => stage.id === id);
+      if (targetIndex < 0 || targetIndex < activeIndex) return;
+      activeIndex = targetIndex;
+      applySnapshot(buildProcessStageSnapshot(stageRows.length, activeIndex), detail);
+      item.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION ? "auto" : "smooth" });
+    }
+
+    function complete(summary = "执行完成", { throughId = null } = {}) {
+      if (settled) return;
+      const completedIndex = throughId === null
+        ? stageRows.length - 1
+        : stageRows.findIndex((stage) => stage.id === throughId);
+      if (completedIndex < 0) return fail(summary);
+      settled = true;
+      stageRows.forEach((_stage, index) => {
+        setStageState(index, index <= completedIndex ? "done" : "pending");
+      });
+      paper.dataset.state = "done";
+      titleNode.textContent = summary;
+      stopTimer();
+    }
+
+    function fail(summary = "执行中止 · 未写入学习进度") {
+      if (settled) return;
+      settled = true;
+      applySnapshot(buildProcessStageSnapshot(stageRows.length, activeIndex, "error"));
+      paper.dataset.state = "error";
+      titleNode.textContent = summary;
+      stopTimer();
+    }
+
+    return Object.freeze({ advance, complete, fail });
+  }
+
   function clear() {
+    for (const timer of activeProcessTimers) globalThis.clearInterval(timer);
+    activeProcessTimers.clear();
     replaceChildren(timeline);
     replaceChildren(optionPanel);
     optionPanel.hidden = true;
@@ -449,6 +602,23 @@ export function createChatView({
         timing: copy.timing,
         annotation: "自动判断以相对做题时间为主；固定答案决定对错，真实改选只会让证据更保守。",
       });
+      const proactive = (view?.agent?.proactive_suggestions || [])[0];
+      if (asText(proactive?.prompt)) {
+        appendCoach([`主动追问：${asText(proactive.prompt).slice(0, 160)}`], {
+          annotation: agentChatAvailable
+            ? "Harness 根据本题证据主动发问 · 直接在输入框回答，所选 Agent 会继续追问"
+            : "Harness 根据本题证据主动发问 · 可先口头复述；连接 Agent 后可继续追问",
+          action: agentChatAvailable
+            ? {
+              label: "回答这道追问",
+              onClick: () => onSuggestion?.({
+                id: asText(proactive.id).slice(0, 64),
+                prompt: asText(proactive.prompt).slice(0, 160),
+              }),
+            }
+            : null,
+        });
+      }
       setComposer({ enabled: true });
     } else if (state === "complete") {
       optionPanel.hidden = true;
@@ -481,11 +651,14 @@ export function createChatView({
     const failure = view?.agent?.failure;
     if (coaching?.coaching_text) {
       const engine = asText(coaching.engine ?? view.agent?.preference, "本机 Agent").slice(0, 64);
+      const modelPreference = asText(coaching.model_preference ?? view.agent?.model_preference).slice(0, 32);
       const text = asText(coaching.coaching_text).slice(0, 2_000);
       const key = `coaching:${asText(view.revision)}:${engine}:${text}`;
       if (renderedAgentKeys.has(key)) return;
       renderedAgentKeys.add(key);
-      appendCoach([text], { annotation: `讲解引擎 ${engine} · 判分固定答案键` });
+      appendCoach([text], {
+        annotation: `讲解引擎 ${engine}${modelPreference ? ` · ${modelPreference}` : ""} · 判分固定答案键`,
+      });
     } else if (failure?.message) {
       const engine = asText(view.agent?.preference, "本机 Agent").slice(0, 64);
       const message = asText(failure.message).slice(0, 240);
@@ -519,6 +692,7 @@ export function createChatView({
     appendCoach,
     appendLearner,
     appendSystem,
+    startProcess,
     clear,
     currentQuestion: () => currentQuestion,
     progressSummary,

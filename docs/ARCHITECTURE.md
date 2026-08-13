@@ -10,13 +10,13 @@
 
 个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。作答行为模块用单调时钟累计前台有效用时、首次选择和有界改选次数；先按题干/选项阅读负荷和逻辑复杂度给出 12–90 秒总体参考，以“前台有效总用时 ÷ 当前参考用时”为主档位：低于 0.55 为偏快，0.55–1.60 为正常，1.60–2.40 为偏慢，超过 2.40 为明显超时。至少积累 12 条干净样本后才用个人 pace 聚合做 0.8–1.25 倍校正，个人参考下限为 8 秒。持久化 pace 始终相对不变的题目负荷分桶，避免个人校准反向污染自己的基线。多选构造不算改选，失焦/隐藏/刷新后的残缺计时不作熟练判断；过早完成首次选择不能通过故意等待提交来洗成正常证据。Web 不要求考生自报把握度：只有答对、连续前台计时完整、总用时处于正常区间、首次选择不过早且没有真实改选，才形成稳定正确证据；过快、过慢、计时不完整或改选都会安排复测，所有答错都会进入稳定准确率分母。行为信号不改写固定答案键的客观对错，只决定正确作答能否成为稳定掌握证据。刷新时只读恢复档案和派生进度，不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
 
-直接打开 GitHub Pages 时默认不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；只有用户点击“连接本机 Agent”后，才会先探测固定健康端点。若 macOS Runtime 未运行，Page 使用不含参数或秘密的固定 custom scheme 唤起已安装应用；只有 v3 health 与工作区就绪后才进入 loopback 确认页。Runtime 不存在、浏览器不支持、用户拒绝许可、连接断开或模型失败时，基础私教仍可完整出题、判分和保存进度。
+直接打开 GitHub Pages 时默认不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；只有用户点击“连接本机 Agent”后，才会先探测固定健康端点。若 macOS Runtime 未运行，Page 使用不含参数或秘密的固定 custom scheme 唤起已安装应用；只有 v4 health 与工作区就绪后才进入 loopback 确认页。Runtime 不存在、浏览器不支持、用户拒绝许可、连接断开或模型失败时，基础私教仍可完整出题、判分和保存进度。
 
 ### Local Agent Runtime
 
 Runtime 只绑定 `127.0.0.1`。受支持的产品路径把它用作确认页和受保护 API：启动包的 `--open` 只打开精确的正式 Pages URL；用户从 Pages 发起配对，本机 `pair.html` 再显式确认授权。公开页面不能直接调用 bootstrap，也不能提交命令、路径、环境变量、模型密钥或用户身份。
 
-Runtime 在监听端口之前创建一份 Digital Employee 密封快照，并生成 `coach-local-workspace.v1` 绑定。该绑定只含员工名、版本、digest、浏览器记忆归属和“可替换大脑”角色，不含目录。员工包 Schema 在同一密封目录中预编译；Adapter inspect、one-shot run 和外层输出校验都使用同一个目录与 digest。工作区准备或 Schema 编译失败时 Runtime 不会对外报告 ready。Page 只接受 `coach-loopback.v3` 和固定员工名的合法绑定，避免将旧 Runtime 或其他员工误接入当前档案。
+Runtime 在监听端口之前创建一份 Digital Employee 密封快照，并生成 `coach-local-workspace.v1` 绑定。该绑定只含员工名、版本、digest、浏览器记忆归属和“可替换大脑”角色，不含目录。员工包 Schema 在同一密封目录中预编译；Adapter inspect、one-shot run 和外层输出校验都使用同一个目录与 digest。工作区准备或 Schema 编译失败时 Runtime 不会对外报告 ready。Page 只接受 `coach-loopback.v4` 和固定员工名的合法绑定，避免将旧 Runtime 或其他员工误接入当前档案。
 
 配对采用 capability grant，而不是 cookie session：
 
@@ -31,6 +31,10 @@ Runtime 在监听端口之前创建一份 Digital Employee 密封快照，并生
 Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状态，不能把“安装了 CLI”冒充成“可以运行”。Claude Code、Qwen Code 和 CodeBuddy 只有在员工包级检查通过时才可选；Qoder 因缺少 `structured_output` 不可选；Codex 在 Digital Employee `0.3.0` 中仍是 probe-only；Hermes Agent 指 Nous Research 的 Hermes Agent，当前也仅以 `hermes --version` 探测，执行 Adapter 尚未实现。
 
 为了让本案例现在可以验证 Codex 体验，Runtime 另有一个不注册进 Digital Employee Host Registry 的 `codex-personal-experimental` 分支。它只有在本机版本与登录探测成功、且当前 Bearer 得到二次明确同意后才可选。提交轮的模型输入不含题干、选项、作答、参考答案或解析，只含科目、考点、掌握结果和去身份化进度；一次性 `codex exec` 也只能返回枚举化 `{coaching_plan}`，再由本地模板生成 summary。无题面复习轮才允许 `{coaching_text}`。判分、反馈与 proposal-only 事件始终由本地受信输入构造，并经过员工包 Schema、动作门和可信事实一致性校验。它持续对外报告 `framework_adapter_status: probe_only`，未来框架具备合格 Codex Adapter 后可直接删去这条案例级分支。
+
+Runtime v4 还把 Codex CLI 本次实际报告、且与已审计版本匹配的模型目录压缩成 `fast / balanced / deep` 三种有界档位。Page 只能提交档位 ID，不能传供应商模型名、reasoning 参数或 CLI flag；Runtime 在每次运行前重新把档位映射到当次认证目录，Runner 还会做第二次 exact model/effort attestation。目录缺失、默认档位无效或请求伪造时，在启动模型前 fail closed。模型档位只影响下一轮讲解，不改变题目、可信判分、session revision 或学习档案。
+
+Pages 对每次讲解显示一张“执行笺”：固定判分、原子提交、等待 Runtime、员工输出校验和最终展示等阶段只在相应边界真实发生时推进，并显示真实等待时长。它不展示或伪造百分比，也不投影 provider 原始 delta、tool 事件、hidden thinking 或 chain-of-thought。完成作答后，Harness 可根据本题行为原因码生成最多三条有界主动追问；首条会直接作为老师问题出现，但提议本身不会自动再调用模型、发送渠道消息或写入进度。
 
 Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 

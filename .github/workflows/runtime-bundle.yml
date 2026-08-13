@@ -55,8 +55,8 @@ jobs:
           esac
           test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$(git rev-parse HEAD)"
           git fetch --no-tags origin \
-            +refs/heads/codex/feat-learning-harness:refs/remotes/origin/codex/feat-learning-harness
-          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/codex/feat-learning-harness)"
+            +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse refs/remotes/origin/main)"
 
       - name: Install locked production dependencies
         run: npm ci --omit=dev

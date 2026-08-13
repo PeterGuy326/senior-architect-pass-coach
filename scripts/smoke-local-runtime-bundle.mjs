@@ -58,7 +58,7 @@ try {
       const body = await response.json();
       if (
         response.ok
-        && body?.protocol === "coach-loopback.v3"
+        && body?.protocol === "coach-loopback.v4"
         && body?.status === "ready"
         && body?.workspace_status === "ready"
       ) {

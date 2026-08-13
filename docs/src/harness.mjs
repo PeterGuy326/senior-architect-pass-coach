@@ -171,6 +171,7 @@ function normalizeSubmission(value, options) {
     response: Array.isArray(response) ? response.map((item) => item.trim()) : response.trim(),
     confidence,
     behavior: settings.behavior ?? null,
+    onPhase: typeof settings.onPhase === "function" ? settings.onPhase : null,
     expectedRevision: settings.expectedRevision,
     expectedItemId: settings.expectedItemId,
   };
@@ -239,6 +240,7 @@ export class BrowserCoachHarness {
     ownsWorker = false,
     agentClient = null,
     agentEngine = "content-only",
+    agentModelPreference = null,
   } = {}) {
     if (!store?.initialize || !store?.commitAttempt) throw new TypeError("coach_store_required");
     if (!worker) throw new TypeError("content_worker_required");
@@ -261,12 +263,16 @@ export class BrowserCoachHarness {
     this.lastError = null;
     this.agentClient = null;
     this.agentEngine = "content-only";
+    this.agentModelPreference = null;
     this.agentCoaching = null;
     this.agentFailure = null;
+    this.pendingProactiveQuestion = null;
+    this.handledProactiveKey = null;
     this.requestCounter = 0;
     this.unsubscribeStore = this.store.subscribe?.(() => {});
     this.setAgentClient(agentClient);
     this.setAgentPreference(agentEngine);
+    this.setAgentModelPreference(agentModelPreference);
   }
 
   setAgentClient(client) {
@@ -287,6 +293,62 @@ export class BrowserCoachHarness {
 
   getAgentPreference() {
     return this.agentEngine;
+  }
+
+  setAgentModelPreference(preference = null) {
+    if (preference !== null && (typeof preference !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/u.test(preference))) {
+      throw coachError("INVALID_MODEL_PREFERENCE", "模型档位标识无效。");
+    }
+    this.agentModelPreference = preference;
+    return this.getView();
+  }
+
+  getAgentModelPreference() {
+    return this.agentModelPreference;
+  }
+
+  getProactiveSuggestions({ maximum = 2 } = {}) {
+    const limit = Number.isInteger(maximum) ? Math.max(0, Math.min(3, maximum)) : 2;
+    if (!this.progress || limit === 0) return Object.freeze([]);
+    const task = this.session?.tasks?.[this.session?.cursor || 0] || null;
+    const topic = task?.topic_id ? this.progress.topics?.[task.topic_id] : null;
+    const signal = topic?.mastery?.recognition?.latest_behavior_signal;
+    const reason = topic?.mastery?.recognition?.latest_behavior_reason_code;
+    const suggestions = [];
+    if (["hesitant", "likely_guess", "overconfident_wrong"].includes(signal)) {
+      suggestions.push({
+        id: "explain-reasoning",
+        reason_code: typeof reason === "string" && /^[a-z0-9_]{1,64}$/u.test(reason) ? reason : `behavior_${signal}`,
+        prompt: "看完批注后先合上答案：你刚才判断时，最关键的依据是哪一条？",
+      });
+    }
+    if (signal === "insufficient_signal") {
+      suggestions.push({
+        id: "rebuild-reasoning",
+        reason_code: typeof reason === "string" && /^[a-z0-9_]{1,64}$/u.test(reason) ? reason : "timing_evidence_incomplete",
+        prompt: "看完批注后先合上答案：按你刚才真实的判断顺序，说出第一步和第二步依据。",
+      });
+    }
+    if (task?.topic_id && (task.action === "review" || task.action === "retest")) {
+      suggestions.push({ id: "contrast-boundary", reason_code: "review_due", prompt: "这个考点最容易和哪个相邻概念混淆？说出一条边界。" });
+    }
+    if (!suggestions.length && task?.topic_id) {
+      suggestions.push({ id: "teach-back", reason_code: "deterministic_priority", prompt: "用一句话复述这个考点的适用条件，我再帮你找缺口。" });
+    }
+    return Object.freeze(suggestions.slice(0, limit).map((item) => Object.freeze(item)));
+  }
+
+  acceptProactiveSuggestion(id) {
+    if (typeof id !== "string") throw coachError("INVALID_PROACTIVE_SUGGESTION", "主动追问标识无效。");
+    const suggestion = this.getProactiveSuggestions({ maximum: 3 }).find((item) => item.id === id);
+    if (!suggestion) throw coachError("INVALID_PROACTIVE_SUGGESTION", "这条主动追问已过期，请使用当前建议。");
+    this.pendingProactiveQuestion = Object.freeze({
+      id: suggestion.id,
+      prompt: suggestion.prompt,
+      revision: this.session?.revision || 0,
+      key: `${this.session?.revision || 0}:${suggestion.id}`,
+    });
+    return suggestion.prompt;
   }
 
   async initialize({ examDate = null, dailyMinutes = 45 } = {}) {
@@ -401,6 +463,12 @@ export class BrowserCoachHarness {
 
   async answer(value, options = undefined) {
     const submission = normalizeSubmission(value, options);
+    const turnAgentEnabled = this.#agentEnabled();
+    const turnAgentEngine = this.agentEngine;
+    const turnModelPreference = this.agentModelPreference;
+    const notifyPhase = (phase) => {
+      try { submission.onPhase?.(phase); } catch { /* Presentation callbacks never control grading. */ }
+    };
     if (this.state !== WEB_HARNESS_STATES.AWAITING_ANSWER || !this.session || !this.question) {
       throw coachError("INVALID_HARNESS_TRANSITION", "当前没有等待作答的题目。");
     }
@@ -420,6 +488,7 @@ export class BrowserCoachHarness {
     this.message = "正在使用固定答案键判定；如已连接 Agent，讲解会在进度提交后生成。";
     this.#emit();
     try {
+      notifyPhase("grading");
       const result = await this.#workerRequest("grade", {
         contentRef: clone(this.session.active_item_ref.content_ref),
         response: submission.response,
@@ -435,6 +504,7 @@ export class BrowserCoachHarness {
         personalBaseline,
       });
       const now = nowFrom(this.clock);
+      notifyPhase("committing");
       const attempt = {
         attempt_id: `objective:${this.session.session_id}:${this.session.cursor + 1}:${this.question.item_id}`,
         item_id: this.question.item_id,
@@ -511,11 +581,13 @@ export class BrowserCoachHarness {
           ? "答案正确，但本次行为证据不足，记为 needs_retest，稍后再测。"
           : "这题尚未掌握，已进入优先复习队列。");
       const committedView = this.#emit();
-      if (!this.#agentEnabled()) return committedView;
+      if (!turnAgentEnabled) return committedView;
+      notifyPhase("agent");
       try {
         const coaching = await this.agentClient.coach({
           phase: "submission",
-          engine: this.agentEngine,
+          engine: turnAgentEngine,
+          modelPreference: turnModelPreference,
           publicQuestion: clone(this.question),
           trustedGrade: clone(grade),
           deidentifiedProgress: this.#deidentifiedProgress(task.topic_id),
@@ -524,7 +596,8 @@ export class BrowserCoachHarness {
         if (!coachingText) throw coachError("EMPTY_AGENT_COACHING", "Agent 没有返回可显示的讲解。");
         this.agentCoaching = {
           coaching_text: coachingText,
-          engine: safeAgentText(coaching?.engine, 64) || this.agentEngine,
+          engine: safeAgentText(coaching?.engine, 64) || turnAgentEngine,
+          model_preference: safeAgentText(coaching?.model_preference, 32) || turnModelPreference,
         };
         this.agentFailure = null;
       } catch (error) {
@@ -534,6 +607,7 @@ export class BrowserCoachHarness {
           message: safeAgentText(error?.message, 240) || "Agent 讲解暂时不可用，已保留固定答案批改结果。",
         };
       }
+      notifyPhase("validating");
       return this.#emit();
     } catch (error) {
       return this.#fail(error);
@@ -584,26 +658,44 @@ export class BrowserCoachHarness {
     return this.getView();
   }
 
-  async askAgent(message) {
+  async askAgent(message, { modelPreference = null } = {}) {
     const text = safeAgentText(message);
     if (!text) throw coachError("EMPTY_CHAT_MESSAGE", "请输入要问私教的问题。");
     if (!this.#agentEnabled()) {
       throw coachError("AGENT_NOT_SELECTED", "请先连接本机 Runtime，并选择一个可用 Agent 引擎。");
     }
+    if (!this.pendingProactiveQuestion && this.state === WEB_HARNESS_STATES.FEEDBACK) {
+      const suggestion = this.getProactiveSuggestions({ maximum: 1 })[0];
+      const key = suggestion ? `${this.session?.revision || 0}:${suggestion.id}` : null;
+      if (suggestion && key !== this.handledProactiveKey) this.acceptProactiveSuggestion(suggestion.id);
+    }
+    const proactive = this.pendingProactiveQuestion
+      && this.pendingProactiveQuestion.revision === (this.session?.revision || 0)
+      ? this.pendingProactiveQuestion
+      : null;
+    const learnerMessage = proactive
+      ? `私教刚才问：${proactive.prompt}\n学习者回答：${text}`
+      : text;
+    const turnAgentEngine = this.agentEngine;
+    const turnModelPreference = modelPreference ?? this.agentModelPreference;
     try {
       const result = await this.agentClient.coach({
         phase: "chat",
-        engine: this.agentEngine,
-        message: text,
+        engine: turnAgentEngine,
+        modelPreference: turnModelPreference,
+        message: learnerMessage,
         publicQuestion: this.question ? clone(this.question) : null,
         trustedGrade: this.state === WEB_HARNESS_STATES.FEEDBACK && this.feedback ? clone(this.feedback) : null,
         deidentifiedProgress: this.#deidentifiedProgress(this.session?.tasks?.[this.session.cursor]?.topic_id),
       });
       const coachingText = safeAgentText(result?.coaching_text);
       if (!coachingText) throw coachError("EMPTY_AGENT_COACHING", "Agent 没有返回可显示的回答。");
+      if (proactive) this.handledProactiveKey = proactive.key;
+      this.pendingProactiveQuestion = null;
       return Object.freeze({
         coaching_text: coachingText,
-        engine: safeAgentText(result?.engine, 64) || this.agentEngine,
+        engine: safeAgentText(result?.engine, 64) || turnAgentEngine,
+        model_preference: safeAgentText(result?.model_preference, 32) || turnModelPreference,
       });
     } catch (error) {
       throw coachError(
@@ -638,9 +730,11 @@ export class BrowserCoachHarness {
       error: this.lastError,
       agent: {
         preference: this.agentEngine,
+        model_preference: this.agentModelPreference,
         connected: Boolean(this.agentClient?.connected),
         coaching: this.agentCoaching,
         failure: this.agentFailure,
+        proactive_suggestions: this.getProactiveSuggestions(),
       },
     });
   }
@@ -699,6 +793,8 @@ export class BrowserCoachHarness {
   #clearAgentTurn() {
     this.agentCoaching = null;
     this.agentFailure = null;
+    this.pendingProactiveQuestion = null;
+    this.handledProactiveKey = null;
   }
 
   #deidentifiedProgress(currentTopic = null) {
@@ -929,7 +1025,9 @@ export class BrowserCoachHarness {
 
   #emit() {
     const view = this.getView();
-    for (const listener of this.listeners) listener(clone(view));
+    for (const listener of this.listeners) {
+      try { listener(clone(view)); } catch { /* Presentation observers never control durable Harness transitions. */ }
+    }
     return view;
   }
 }

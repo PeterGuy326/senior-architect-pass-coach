@@ -18,6 +18,7 @@ import {
   CODEX_PERSONAL_MODE,
   SUBMIT_COACHING_PLAN_SCHEMA,
   CodexPersonalRunner,
+  attestCodexModelPreferences,
   parseCodexJsonl,
   probeCodexPersonalMode,
   runBoundedProcess,
@@ -144,8 +145,29 @@ function readyProbe() {
     adapter_status: "experimental_personal",
     qualified_adapter: false,
     reason_codes: ["digital_employee_adapter_unqualified", "personal_saved_login_reused"],
+    model_preferences: JSON.parse(MODEL_CATALOG).models.map((model, index) => ({
+      id: ["fast", "balanced", "deep"][index],
+      label: ["快速", "均衡", "深入"][index],
+      model: model.slug,
+      reasoning_effort: model.supported_reasoning_levels[0].effort,
+      selectable: true,
+    })),
   };
 }
+
+const MODEL_CATALOG = JSON.stringify({ models: [
+  { slug: "gpt-5.6-luna", visibility: "list", supported_reasoning_levels: [{ effort: "low" }] },
+  { slug: "gpt-5.6-terra", visibility: "list", supported_reasoning_levels: [{ effort: "medium" }] },
+  { slug: "gpt-5.6-sol", visibility: "list", supported_reasoning_levels: [{ effort: "low" }] },
+] });
+
+test("model preferences are attested only from a bounded visible Codex catalog", () => {
+  assert.deepEqual(attestCodexModelPreferences(MODEL_CATALOG).map(({ id }) => id), ["fast", "balanced", "deep"]);
+  assert.deepEqual(attestCodexModelPreferences(JSON.stringify({ models: [
+    { slug: "gpt-5.6-luna", visibility: "hide", supported_reasoning_levels: [{ effort: "low" }] },
+    { slug: "attacker-model", visibility: "list", supported_reasoning_levels: [{ effort: "low" }] },
+  ] })), []);
+});
 
 async function authFixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "codex-personal-test-"));
@@ -171,6 +193,7 @@ test("probe reports only an audited saved-login personal mode without claiming a
         stderr: "",
       };
     }
+    if (request.args[0] === "debug") return { exitCode: 0, signal: null, stdout: MODEL_CATALOG, stderr: "" };
     return { exitCode: 0, signal: null, stdout: "Logged in using ChatGPT\n", stderr: "" };
   };
 
@@ -188,7 +211,8 @@ test("probe reports only an audited saved-login personal mode without claiming a
   assert.equal(result.adapter_status, "experimental_personal");
   assert.ok(result.reason_codes.includes("digital_employee_adapter_unqualified"));
   assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0"]);
-  assert.deepEqual(calls.map((call) => call.args), [["--version"], ["exec", "--help"], ["login", "status"]]);
+  assert.deepEqual(calls.map((call) => call.args), [["--version"], ["exec", "--help"], ["debug", "models", "--bundled"], ["login", "status"]]);
+  assert.deepEqual(result.model_preferences.map(({ id }) => id), ["fast", "balanced", "deep"]);
   assert.doesNotMatch(JSON.stringify(result), /Logged in|ChatGPT/u);
 });
 
@@ -293,6 +317,8 @@ test("personal runner isolates HOME, reuses auth by symlink, and treats the mode
   };
   const runner = new CodexPersonalRunner({
     authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
     processRunner,
     probe: async () => readyProbe(),
     personalAuthConsent: true,
@@ -308,10 +334,31 @@ test("personal runner isolates HOME, reuses auth by symlink, and treats the mode
   await assert.rejects(lstat(isolatedRoot), (error) => error.code === "ENOENT");
 });
 
+test("an attested preference is passed as model plus bounded reasoning config", async (t) => {
+  const { authFile } = await authFixture(t);
+  const runner = new CodexPersonalRunner({
+    authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
+    processRunner: async (request) => {
+      assert.equal(request.args[request.args.indexOf("--model") + 1], "gpt-5.6-luna");
+      const reasoningIndex = request.args.findIndex((entry) => entry === "model_reasoning_effort=\"low\"");
+      assert.ok(reasoningIndex > 0);
+      assert.equal(request.args[reasoningIndex - 1], "-c");
+      return { exitCode: 0, signal: null, stdout: jsonl(), stderr: "" };
+    },
+    probe: async () => readyProbe(),
+    personalAuthConsent: true,
+  });
+  await runner.run(reviewInput());
+});
+
 test("submit output copies grade, feedback, and progress facts only from trusted input", async (t) => {
   const { authFile } = await authFixture(t);
   const runner = new CodexPersonalRunner({
     authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
     processRunner: async (request) => {
       const schemaPath = request.args[request.args.indexOf("--output-schema") + 1];
       const schema = JSON.parse(await readFile(schemaPath, "utf8"));
@@ -355,6 +402,8 @@ test("personal auth use is opt-in even when Codex is installed and logged in", a
   const { authFile } = await authFixture(t);
   const runner = new CodexPersonalRunner({
     authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
     probe: async () => readyProbe(),
   });
   const preflight = await runner.preflight();
@@ -369,6 +418,8 @@ test("personal runner rejects pre-answer practice and submit free text", async (
   const { authFile } = await authFixture(t);
   const runner = new CodexPersonalRunner({
     authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
     processRunner: async () => ({
       exitCode: 0,
       signal: null,
@@ -450,6 +501,8 @@ test("successful exit with stderr is rejected and never returned to the caller",
   const { authFile } = await authFixture(t);
   const runner = new CodexPersonalRunner({
     authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
     processRunner: async () => ({
       exitCode: 0,
       signal: null,
@@ -466,6 +519,80 @@ test("successful exit with stderr is rejected and never returned to the caller",
       && !error.message.includes("sensitive diagnostic")
     ),
   );
+});
+
+test("runner fails closed when an exact model preference is not attested", async (t) => {
+  const { authFile } = await authFixture(t);
+  let runs = 0;
+  const runner = new CodexPersonalRunner({
+    authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
+    processRunner: async () => {
+      runs += 1;
+      return { exitCode: 0, signal: null, stdout: jsonl(), stderr: "" };
+    },
+    probe: async () => ({ ...readyProbe(), model_preferences: [] }),
+    personalAuthConsent: true,
+  });
+  await assert.rejects(
+    runner.run(reviewInput()),
+    (error) => error.code === "CODEX_PERSONAL_MODEL_NOT_ATTESTED",
+  );
+  assert.equal(runs, 0);
+});
+
+test("every turn reattests the Codex command surface before model execution", async (t) => {
+  const { root, authFile } = await authFixture(t);
+  let commandSurfaceSupported = true;
+  let modelExecutions = 0;
+  const processRunner = async ({ args }) => {
+    if (args[0] === "--version") {
+      return { exitCode: 0, signal: null, stdout: "codex-cli 0.146.0\n", stderr: "" };
+    }
+    if (args[0] === "exec" && args[1] === "--help") {
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: commandSurfaceSupported
+          ? "--disable --ephemeral --ignore-rules --ignore-user-config --json --output-schema --skip-git-repo-check --strict-config"
+          : "--disable --ephemeral --ignore-rules --ignore-user-config --json --output-schema --skip-git-repo-check",
+        stderr: "",
+      };
+    }
+    if (args[0] === "debug") {
+      return { exitCode: 0, signal: null, stdout: MODEL_CATALOG, stderr: "" };
+    }
+    if (args[0] === "login") {
+      return { exitCode: 0, signal: null, stdout: "logged in", stderr: "" };
+    }
+    modelExecutions += 1;
+    return { exitCode: 0, signal: null, stdout: jsonl(), stderr: "" };
+  };
+
+  const inspected = await probeCodexPersonalMode({
+    processRunner,
+    environment: { HOME: root, PATH: "/bin" },
+    userCodexHome: root,
+    authFile,
+  });
+  assert.equal(inspected.status, "ready");
+
+  commandSurfaceSupported = false;
+  const runner = new CodexPersonalRunner({
+    authFile,
+    model: "gpt-5.6-luna",
+    reasoningEffort: "low",
+    processRunner,
+    environment: { HOME: root, PATH: "/bin" },
+    userCodexHome: root,
+    personalAuthConsent: true,
+  });
+  await assert.rejects(
+    runner.run(reviewInput()),
+    (error) => error.code === "CODEX_PERSONAL_UNAVAILABLE",
+  );
+  assert.equal(modelExecutions, 0);
 });
 
 test("bounded process terminates output overflow, timeout, and external cancellation", async () => {
