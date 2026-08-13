@@ -32,7 +32,7 @@ Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状�
 
 为了让本案例现在可以验证 Codex 体验，Runtime 另有一个不注册进 Digital Employee Host Registry 的 `codex-personal-experimental` 分支。它只有在本机版本与登录探测成功、且当前 Bearer 得到二次明确同意后才可选。提交轮的模型输入不含题干、选项、作答、参考答案或解析，只含科目、考点、掌握结果和去身份化进度；一次性 `codex exec` 也只能返回枚举化 `{coaching_plan}`，再由本地模板生成 summary。无题面复习轮才允许 `{coaching_text}`。判分、反馈与 proposal-only 事件始终由本地受信输入构造，并经过员工包 Schema、动作门和可信事实一致性校验。它持续对外报告 `framework_adapter_status: probe_only`，未来框架具备合格 Codex Adapter 后可直接删去这条案例级分支。
 
-Runtime v4 还把 Codex CLI 本次实际报告、且与已审计版本匹配的模型目录压缩成 `fast / balanced / deep` 三种有界档位。Page 只能提交档位 ID，不能传供应商模型名、reasoning 参数或 CLI flag；Runtime 在每次运行前重新把档位映射到当次认证目录，Runner 还会做第二次 exact model/effort attestation。目录缺失、默认档位无效或请求伪造时，在启动模型前 fail closed。模型档位只影响下一轮讲解，不改变题目、可信判分、session revision 或学习档案。
+Runtime v4 还把 Codex CLI 本次实际报告、且与已审计版本匹配的模型目录压缩成 `lite / fast / balanced / deep` 四种有界档位。Page 只能提交档位 ID，不能传供应商模型名、reasoning 参数或 CLI flag；Runner 在每次运行前做一次紧邻执行的完整认证，并在同一个内部边界把 opaque ID 映射为 exact model/effort。目录缺失、默认档位无效或请求伪造时，在启动模型前 fail closed，也不会静默换档。模型档位只影响下一轮讲解，不改变题目、可信判分、session revision 或学习档案。
 
 Pages 对每次讲解显示一张“执行笺”：固定判分、原子提交、等待 Runtime、员工输出校验和最终展示等阶段只在相应边界真实发生时推进，并显示真实等待时长。它不展示或伪造百分比，也不投影 provider 原始 delta、tool 事件、hidden thinking 或 chain-of-thought。完成作答后，Harness 可根据本题行为原因码生成最多三条有界主动追问；首条会直接作为老师问题出现，但提议本身不会自动再调用模型、发送渠道消息或写入进度。
 
