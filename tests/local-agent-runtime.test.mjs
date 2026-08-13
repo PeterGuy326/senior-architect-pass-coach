@@ -210,17 +210,31 @@ async function fixture(options = {}) {
     adapter_status: "experimental_personal",
     qualified_adapter: false,
     reason_codes: ["digital_employee_adapter_unqualified", "personal_saved_login_reused"],
+    model_preferences: [{
+      id: "fast",
+      label: "快速",
+      model: "gpt-5.6-luna",
+      reasoning_effort: "low",
+      selectable: true,
+    }],
+    default_model_preference: "fast",
   }));
-  const codexPersonalRunnerFactory = options.codexPersonalRunnerFactory || (({ personalAuthConsent }) => ({
-    async preflight() {
+  const codexPersonalRunnerFactory = options.codexPersonalRunnerFactory || (({ personalAuthConsent, model, reasoningEffort }) => {
+    const preflight = async () => {
       assert.equal(personalAuthConsent, true);
+      assert.equal(model, "gpt-5.6-luna");
+      assert.equal(reasoningEffort, "low");
       calls.codexPreflights += 1;
-    },
-    async run(input) {
-      calls.codexRuns.push(input);
-      return completedSubmitOutput("Codex personal coaching.");
-    },
-  }));
+    };
+    return {
+      preflight,
+      async run(input) {
+        await preflight();
+        calls.codexRuns.push(input);
+        return completedSubmitOutput("Codex personal coaching.");
+      },
+    };
+  });
   const runtime = createLocalAgentRuntime({
     docsRoot: directory,
     port: 0,
@@ -306,6 +320,27 @@ function rawRequest(runtime, { path: requestPath, host = runtime.exactHost }) {
     request.once("error", reject);
     request.end();
   });
+}
+
+function coachHttpRequest(runtime, idempotencyKey, body = submitBody()) {
+  const port = Number(runtime.exactHost.split(":")[1]);
+  const serialized = JSON.stringify(body);
+  const request = httpRequest({
+    hostname: LOOPBACK_HOST,
+    port,
+    method: "POST",
+    path: "/v1/coach",
+    headers: {
+      ...baseHeaders(runtime),
+      Host: runtime.exactHost,
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(serialized),
+      "Idempotency-Key": idempotencyKey,
+    },
+  });
+  request.on("error", () => {});
+  request.end(serialized);
+  return request;
 }
 
 test("runtime binds IPv4 loopback, redirects its root to Pages, serves only pairing assets, and exposes health", async (t) => {
@@ -641,6 +676,28 @@ test("Codex personal consent is bearer-bound, in-memory, and required before a r
   assert.equal(consented.status, 200);
   assert.equal(consented.body.adapter.state, "experimental_personal");
   assert.equal(consented.body.adapter.selectable, true);
+  assert.equal(consented.body.adapter.default_model_preference, "fast");
+  assert.deepEqual(consented.body.adapter.model_preferences, [{
+    id: "fast",
+    label: "快速",
+    selectable: true,
+  }]);
+  assert.equal(JSON.stringify(consented.body.adapter).includes("gpt-5.6"), false);
+  assert.equal(JSON.stringify(consented.body.adapter).includes("reasoning_effort"), false);
+
+  const forgedPreference = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "codex-forged-model-preference",
+    },
+    body: JSON.stringify(submitBody({ engine: "codex", model_preference: "attacker" })),
+  }));
+  assert.equal(forgedPreference.status, 400);
+  assert.equal(forgedPreference.body.reason_code, "invalid_request");
+  assert.equal(environment.calls.codexPreflights, 0);
+  assert.equal(environment.calls.codexRuns.length, 0);
 
   const coaching = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
     method: "POST",
@@ -649,14 +706,42 @@ test("Codex personal consent is bearer-bound, in-memory, and required before a r
       "Content-Type": "application/json",
       "Idempotency-Key": "codex-after-consent",
     },
-    body: JSON.stringify(submitBody({ engine: "codex" })),
+    body: JSON.stringify(submitBody({ engine: "codex", model_preference: "fast" })),
   }));
   assert.equal(coaching.status, 200);
   assert.equal(coaching.body.coaching_text, "Codex personal coaching.");
   assert.equal(coaching.body.execution_mode, "personal_experimental");
   assert.equal(coaching.body.framework_adapter_status, "probe_only");
+  assert.equal(coaching.body.model_preference, "fast");
+  assert.deepEqual(coaching.body.stages.map(({ id }) => id), ["request_validated", "agent_running", "output_validated"]);
   assert.equal(environment.calls.codexPreflights, 1);
   assert.equal(environment.calls.codexRuns.length, 1);
+});
+
+test("Codex stays unselectable when no exact model profile is attested", async (t) => {
+  const environment = await fixture({
+    codexPersonalProbe: async () => ({
+      mode: "codex-personal-experimental",
+      engine: "codex",
+      status: "ready",
+      available: true,
+      version: "0.146.0",
+      qualified_adapter: false,
+      reason_codes: ["codex_model_catalog_unavailable"],
+      model_preferences: [],
+      default_model_preference: null,
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+  const response = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  const codex = response.body.adapters.find(({ id }) => id === "codex");
+  assert.equal(codex.state, "incompatible");
+  assert.equal(codex.selectable, false);
+  assert.deepEqual(codex.model_preferences, []);
+  assert.equal(codex.default_model_preference, null);
 });
 
 test("Codex personal coaching cannot restate or contradict the trusted answer", async (t) => {
@@ -686,7 +771,7 @@ test("Codex personal coaching cannot restate or contradict the trusted answer", 
       "Content-Type": "application/json",
       "Idempotency-Key": "codex-answer-assertion",
     },
-    body: JSON.stringify(submitBody({ engine: "codex" })),
+    body: JSON.stringify(submitBody({ engine: "codex", model_preference: "fast" })),
   }));
   assert.equal(response.status, 502);
   assert.equal(response.body.reason_code, "agent_output_rejected");
@@ -1094,6 +1179,79 @@ test("strict request fields, idempotency conflicts, and one-run concurrency fail
   assert.equal(environment.calls.runs.length, 1);
 });
 
+test("disconnecting a coach client aborts preflight and releases the busy gate", async (t) => {
+  let preflightSignal;
+  let started;
+  const startedPromise = new Promise((resolve) => { started = resolve; });
+  const environment = await fixture({
+    runnerFactory: () => ({
+      async preflight({ signal } = {}) {
+        preflightSignal = signal;
+        started();
+        await new Promise((resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+      async run() { throw new Error("run_must_not_start"); },
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  const request = coachHttpRequest(environment.runtime, "disconnect-abort-1");
+  await startedPromise;
+  assert.ok(preflightSignal instanceof AbortSignal);
+  assert.equal(preflightSignal.aborted, false);
+  const aborted = new Promise((resolve) => preflightSignal.addEventListener("abort", resolve, { once: true }));
+  request.destroy();
+  await aborted;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(preflightSignal.aborted, true);
+  assert.equal(environment.runtime.runBusy, false);
+  assert.equal(environment.runtime.activeCoachControllers.size, 0);
+});
+
+test("runtime stop aborts an active runner and does not wait for a non-cooperative run", async (t) => {
+  let runSignal;
+  let started;
+  const startedPromise = new Promise((resolve) => { started = resolve; });
+  const never = new Promise(() => {});
+  const environment = await fixture({
+    runnerFactory: () => ({
+      async preflight({ signal } = {}) {
+        assert.ok(signal instanceof AbortSignal);
+      },
+      async run(input, { signal } = {}) {
+        runSignal = signal;
+        started();
+        await never;
+      },
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  coachHttpRequest(environment.runtime, "stop-abort-1");
+  await startedPromise;
+  assert.equal(runSignal.aborted, false);
+  let timeout;
+  try {
+    await Promise.race([
+      environment.runtime.stop(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("stop_timed_out")), 1_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  assert.equal(runSignal.aborted, true);
+  assert.equal(environment.runtime.runBusy, false);
+  assert.equal(environment.runtime.activeCoachControllers.size, 0);
+});
+
 test("agent fact mismatches return only a stable reason code and are cached", async (t) => {
   const mismatched = completedSubmitOutput();
   mismatched.teaching_result.feedback[0].reference_answer = "LOCAL_SECRET_PATH";
@@ -1188,7 +1346,7 @@ test("--open uses an argument array with shell disabled and only the exact publi
 });
 
 test("the macOS bundle registers one launch-only URL scheme", () => {
-  const plist = createMacInfoPlist("0.6.0");
+  const plist = createMacInfoPlist("0.7.0");
   assert.equal(MAC_RUNTIME_URL_SCHEME, "senior-architect-pass-coach");
   assert.equal(RUNTIME_LAUNCH_URL, `${MAC_RUNTIME_URL_SCHEME}://launch`);
   assert.match(plist, /<key>CFBundleURLTypes<\/key>/u);

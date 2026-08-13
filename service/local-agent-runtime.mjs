@@ -22,7 +22,7 @@ import { employeePackageDirectory, repositoryRoot } from "./paths.mjs";
 import { validateTeachingOutput } from "./proposal-validator.mjs";
 import { createEmployeeSchemaValidators } from "./schema-validator.mjs";
 
-export const LOOPBACK_PROTOCOL = "coach-loopback.v3";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v4";
 const AGENT_CATALOG_SCHEMA = "coach-agent-catalog.v1";
 export const LOOPBACK_HOST = "127.0.0.1";
 export const DEFAULT_LOOPBACK_PORT = 43_127;
@@ -35,6 +35,7 @@ const DEFAULT_MAX_STATIC_BYTES = 8 * 1024 * 1024;
 const DEFAULT_GRANT_LIFETIME_MS = 4 * 60 * 60 * 1_000;
 const MAX_IDEMPOTENCY_RESULTS = 64;
 const MAX_BEARER_HASHES = 4;
+const PRIVATE_MODEL_BINDINGS = Symbol("private_model_bindings");
 const PAIR_STATIC_PATHS = new Set([
   "/pair.html",
   "/src/local-agent-client.mjs",
@@ -124,6 +125,17 @@ class RuntimeRequestError extends Error {
 
 function requestError(code) {
   return new RuntimeRequestError(code);
+}
+
+function waitWithAbort(operation, signal) {
+  if (!signal) return operation;
+  if (signal.aborted) return Promise.reject(new Error("operation_aborted"));
+  let rejectAborted;
+  const aborted = new Promise((_, reject) => { rejectAborted = reject; });
+  const onAbort = () => rejectAborted(new Error("operation_aborted"));
+  signal.addEventListener("abort", onAbort, { once: true });
+  return Promise.race([operation, aborted])
+    .finally(() => signal.removeEventListener("abort", onAbort));
 }
 
 function cloneJson(value) {
@@ -288,13 +300,17 @@ function validateProgress(value) {
 function normalizeCoachRequest(value, engineIds) {
   exactObject(
     value,
-    ["phase", "engine", "public_question", "trusted_grade", "deidentified_progress", "message"],
+    ["phase", "engine", "model_preference", "public_question", "trusted_grade", "deidentified_progress", "message"],
     ["phase", "engine", "public_question", "deidentified_progress"],
   );
   const phase = boundedText(value.phase, 16);
   if (!new Set(["submit", "chat"]).has(phase)) throw requestError("INVALID_REQUEST");
   const engine = boundedText(value.engine, 64);
   if (!engineIds.has(engine)) throw requestError("ADAPTER_NOT_FOUND");
+  const modelPreference = value.model_preference === undefined
+    ? null
+    : boundedText(value.model_preference, 32, { pattern: /^[a-z][a-z0-9_-]{0,31}$/u });
+  if (engine !== "codex" && modelPreference !== null) throw requestError("INVALID_REQUEST");
   const publicQuestion = value.public_question === null && phase === "chat"
     ? null
     : validateQuestion(value.public_question);
@@ -326,6 +342,7 @@ function normalizeCoachRequest(value, engineIds) {
   return {
     phase,
     engine,
+    modelPreference,
     publicQuestion,
     trustedGrade,
     progress,
@@ -525,6 +542,44 @@ function publicAdapter(entry, inspection) {
 }
 
 function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
+  const attestedPreferences = Array.isArray(probe?.model_preferences)
+    ? probe.model_preferences.slice(0, 8).filter((preference) => (
+      preference
+      && typeof preference.id === "string"
+      && /^[a-z][a-z0-9_-]{0,31}$/u.test(preference.id)
+      && typeof preference.label === "string"
+      && preference.label.length >= 1
+      && preference.label.length <= 80
+      && typeof preference.model === "string"
+      && /^[a-z0-9][a-z0-9._-]{0,127}$/u.test(preference.model)
+      && new Set(["low", "medium", "high"]).has(preference.reasoning_effort)
+      && preference.selectable === true
+    )).map(({ id, label, model, reasoning_effort: reasoningEffort }) => ({
+      id,
+      label,
+      model,
+      reasoning_effort: reasoningEffort,
+      selectable: true,
+    }))
+    : [];
+  const modelPreferences = attestedPreferences.map(({ id, label }) => ({
+    id,
+    label,
+    selectable: true,
+  }));
+  const privateModelBindings = new Map(attestedPreferences.map((preference) => [
+    preference.id,
+    Object.freeze({
+      model: preference.model,
+      reasoningEffort: preference.reasoning_effort,
+    }),
+  ]));
+  const requestedDefault = typeof probe?.default_model_preference === "string"
+    ? probe.default_model_preference
+    : null;
+  const defaultModelPreference = modelPreferences.some(({ id }) => id === requestedDefault)
+    ? requestedDefault
+    : null;
   const rawReasons = Array.isArray(probe?.reason_codes) ? probe.reason_codes : [];
   const reasonMap = Object.freeze({
     codex_not_found: "codex_executable_not_found",
@@ -536,15 +591,16 @@ function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
     ...rawReasons.map((reason) => reasonMap[reason] || reason),
     ...(probe?.status === "ready" && !consented ? ["codex_personal_consent_required"] : []),
   ])].filter((reason) => SAFE_REASON_CODE.test(reason)).slice(0, 16);
-  const ready = probe?.status === "ready" && probe?.available === true;
+  const baseReady = probe?.status === "ready" && probe?.available === true;
+  const ready = baseReady && modelPreferences.length > 0 && defaultModelPreference !== null;
   const state = ready
     ? (consented ? "experimental_personal" : "consent_required")
     : probe?.status === "needs_login"
       ? "needs_login"
-      : probe?.status === "incompatible"
+      : (probe?.status === "incompatible" || baseReady)
         ? "incompatible"
       : "unavailable";
-  return {
+  const adapter = {
     id: entry.id,
     label: entry.label,
     state,
@@ -553,14 +609,25 @@ function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
       ? "ready"
       : probe?.status === "needs_login"
         ? "not_ready"
-        : probe?.status === "incompatible"
+        : (probe?.status === "incompatible" || baseReady)
           ? "installed"
           : "not_found",
     adapter_status: "experimental_personal",
     execution_mode: "personal_experimental",
     framework_adapter_status: "probe_only",
     reason_codes: reasons,
+    model_preferences: modelPreferences,
+    default_model_preference: defaultModelPreference,
   };
+  // Provider model names and CLI controls stay Runtime-private. The Page receives
+  // only opaque, attested preference IDs and display labels.
+  Object.defineProperty(adapter, PRIVATE_MODEL_BINDINGS, {
+    value: privateModelBindings,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return adapter;
 }
 
 function hashToken(token) {
@@ -746,13 +813,12 @@ export class LocalAgentRuntime {
     workspaceFactory = (options) => createLocalEmployeeWorkspace(options),
     schemaValidatorsFactory = (options) => createEmployeeSchemaValidators(options),
     codexPersonalProbe = probeCodexPersonalMode,
-    codexPersonalRunnerFactory = ({ personalAuthConsent, schemaValidators }) => new CodexPersonalRunner({
+    codexPersonalRunnerFactory = ({ personalAuthConsent, schemaValidators, model, reasoningEffort }) => new CodexPersonalRunner({
       personalAuthConsent,
       validateInput: schemaValidators.validateEmployeeInput,
       validateOutput: schemaValidators.validateEmployeeOutput,
-      ...(process.env.SENIOR_ARCHITECT_CODEX_MODEL
-        ? { model: process.env.SENIOR_ARCHITECT_CODEX_MODEL }
-        : {}),
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     }),
     tokenFactory = () => randomBytes(32).toString("base64url"),
     serverFactory = createServer,
@@ -847,6 +913,7 @@ export class LocalAgentRuntime {
     this.origin = null;
     this.bearerGrants = [];
     this.idempotency = new Map();
+    this.activeCoachControllers = new Set();
     this.runBusy = false;
     this.instanceId = randomUUID();
   }
@@ -894,6 +961,7 @@ export class LocalAgentRuntime {
       server = this.serverFactory((request, response) => {
         this.#applyCorsHeaders(request, response);
         this.#handle(request, response).catch((error) => {
+          if (response.destroyed || response.writableEnded) return;
           if (!response.headersSent) {
             const result = safeErrorResult(error);
             sendJson(response, result.statusCode, result.body);
@@ -942,6 +1010,7 @@ export class LocalAgentRuntime {
   async stop() {
     const server = this.server;
     const workspace = this.workspace;
+    for (const controller of this.activeCoachControllers) controller.abort();
     this.server = null;
     this.workspace = null;
     this.schemaValidators = null;
@@ -952,6 +1021,10 @@ export class LocalAgentRuntime {
         await new Promise((resolve, reject) => {
           server.close((error) => (error ? reject(error) : resolve()));
           server.closeIdleConnections?.();
+          // Aborted runner signals are the graceful cancellation path. Closing
+          // any remaining sockets also prevents a non-cooperative runner or a
+          // partial request body from making Runtime shutdown wait indefinitely.
+          server.closeAllConnections?.();
         });
       }
     } finally {
@@ -1087,8 +1160,29 @@ export class LocalAgentRuntime {
       if (typeof idempotencyKey !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
         throw requestError("INVALID_IDEMPOTENCY_KEY");
       }
-      const { body, value } = await readJson(request, this.maxBodyBytes);
-      await this.#handleCoach(response, idempotencyKey, body, value, grant);
+      const controller = new AbortController();
+      let responseFinished = false;
+      const abort = () => controller.abort();
+      const onResponseFinish = () => { responseFinished = true; };
+      const onResponseClose = () => {
+        if (!responseFinished && !response.writableFinished) abort();
+      };
+      request.once("aborted", abort);
+      response.once("finish", onResponseFinish);
+      response.once("close", onResponseClose);
+      this.activeCoachControllers.add(controller);
+      if (request.aborted || response.destroyed) abort();
+      try {
+        const { body, value } = await readJson(request, this.maxBodyBytes);
+        await this.#handleCoach(response, idempotencyKey, body, value, grant, {
+          signal: controller.signal,
+        });
+      } finally {
+        request.off("aborted", abort);
+        response.off("finish", onResponseFinish);
+        response.off("close", onResponseClose);
+        this.activeCoachControllers.delete(controller);
+      }
       return;
     }
     if (pathname.startsWith("/v1/")) throw requestError("NOT_FOUND");
@@ -1230,20 +1324,20 @@ export class LocalAgentRuntime {
     this.bearerGrants = this.bearerGrants.filter((grant) => grant.expiresAt > now);
   }
 
-  async #handleCoach(response, idempotencyKey, rawBody, value, grant) {
+  async #handleCoach(response, idempotencyKey, rawBody, value, grant, { signal } = {}) {
     const digest = createHash("sha256").update(rawBody).digest("hex");
     const receiptKey = `${grant.hash.toString("hex")}:${idempotencyKey}`;
     const existing = this.idempotency.get(receiptKey);
     if (existing) {
       if (existing.digest !== digest) throw requestError("IDEMPOTENCY_CONFLICT");
-      const replay = await existing.result;
+      const replay = await waitWithAbort(existing.result, signal);
       sendJson(response, replay.statusCode, replay.body, { "Idempotency-Replayed": "true" });
       return;
     }
     if (this.runBusy) throw requestError("AGENT_BUSY");
     const normalized = normalizeCoachRequest(value, this.engineIds);
     this.runBusy = true;
-    const result = this.#runCoach(normalized, { grant })
+    const result = waitWithAbort(this.#runCoach(normalized, { grant, signal }), signal)
       .then((body) => ({ statusCode: 200, body }))
       .catch((error) => safeErrorResult(error))
       .finally(() => { this.runBusy = false; });
@@ -1260,19 +1354,30 @@ export class LocalAgentRuntime {
     }
   }
 
-  async #runCoach(request, { grant } = {}) {
+  async #runCoach(request, { grant, signal } = {}) {
     const { action, input } = await buildEmployeeInput(
       request,
       this.schemaValidators.validateEmployeeInput,
     );
     const adapter = await this.inspect(request.engine, { grant });
     if (!adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
+    const modelPreference = request.engine === "codex"
+      ? (request.modelPreference || adapter.default_model_preference)
+      : null;
+    const attestedModel = request.engine === "codex"
+      ? adapter[PRIVATE_MODEL_BINDINGS]?.get(modelPreference)
+      : null;
+    if (request.engine === "codex" && !attestedModel) {
+      throw requestError("INVALID_REQUEST");
+    }
     let output;
     try {
       const runner = request.engine === "codex"
         ? this.codexPersonalRunnerFactory({
             personalAuthConsent: grant?.codexPersonalConsent === true,
             schemaValidators: this.schemaValidators,
+            model: attestedModel?.model,
+            reasoningEffort: attestedModel?.reasoningEffort,
           })
         : this.runnerFactory({
             engine: request.engine,
@@ -1282,8 +1387,14 @@ export class LocalAgentRuntime {
       if (!runner || typeof runner.preflight !== "function" || typeof runner.run !== "function") {
         throw new Error("invalid_runner");
       }
-      await runner.preflight();
-      output = await runner.run(input, { runId: `loopback-${randomUUID()}` });
+      // CodexPersonalRunner.run() owns its per-turn re-attestation. Calling its
+      // preflight here as well would probe the same local catalog twice before
+      // every response. Qualified framework runners retain the explicit gate.
+      if (request.engine !== "codex") await runner.preflight({ signal });
+      output = await runner.run(input, {
+        runId: `loopback-${randomUUID()}`,
+        signal,
+      });
     } catch {
       throw requestError("AGENT_RUN_FAILED");
     }
@@ -1314,6 +1425,12 @@ export class LocalAgentRuntime {
         progress_write: "not_performed",
         execution_mode: request.engine === "codex" ? "personal_experimental" : "qualified_adapter",
         framework_adapter_status: request.engine === "codex" ? "probe_only" : "runnable",
+        model_preference: modelPreference,
+        stages: [
+          { id: "request_validated", status: "completed" },
+          { id: "agent_running", status: "completed" },
+          { id: "output_validated", status: "completed" },
+        ],
       };
     } catch (error) {
       if (error instanceof RuntimeRequestError) throw error;

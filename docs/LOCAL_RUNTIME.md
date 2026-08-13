@@ -10,6 +10,7 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 4. 在 Pages 的私教大脑面板里直接点击目标 Agent 卡片。网页会在这次点击内探测固定健康端点：已经运行就直接配对；macOS 没有运行时才用上面的固定入口唤起应用并短暂等待，Linux 必须先手工运行 `start-local-coach`。只有健康响应同时匹配协议、状态和实例标识后，等待窗口才会进入 Runtime 自己的确认页。点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络；目标 Agent 通过检查后会自动进入对话。
 5. Runtime 先用 Digital Employee 密封一份只读员工工作区，并将员工名、版本和 digest 返回给 Page；Schema 校验、兼容性探测和执行都绑定到该工作区。
 6. Runtime 只会激活刚才点击且实际检查为“可用”的 Agent，不会回退到其他模型。Codex 会先显示“需要本人同意”，确认复用本机 Codex / ChatGPT 登录后才进入对话。答题仍由固定答案键批改；提交后才会追加 Agent 的个性化讲解，也可以继续追问。
+7. Codex 连接后可选择“快速 / 均衡 / 深入”档位。页面只显示本机 Codex 当次实际认证通过的项目；切换只影响下一轮，不改学习档案。对话与批改期间会显示可验证执行阶段和真实耗时，但不会展示模型内部思维链。输入框 Enter 发送、Shift+Enter 换行，中文输入法组合态不会误发。
 
 不需要 clone 仓库、安装 npm 包或编译源码。当前 macOS 包是未 notarize 的开源预览版；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。首次启动可先在 Finder 中右键应用并选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。
 
@@ -49,6 +50,8 @@ Runtime 不会把 Agent CLI 一起打包，也不会从网页收集 API Key。Di
 预览版只读取启动环境，不提供网页密钥表单。不要把 Key 放进 URL、聊天内容、仓库文件或命令参数；请使用自己信任的本机凭证管理方式先建立 Runtime 的环境，再启动应用。后续正式安装器应接入操作系统 Keychain/Credential Manager。
 
 Codex 个人实验模式不会复制或记录 `auth.json` 内容。每轮只在 owner-only 临时目录放置一个指向现有登录文件的短生命周期链接，以一次性 `codex exec --ephemeral --json --output-schema` 执行；教学 Prompt 经 stdin 发送，不进入命令行参数。它不参与出题。提交后只向模型投影科目、考点、掌握结果和去身份化进度，不发送题干、选项、作答、参考答案或解析；模型只能选择枚举化补救计划，本地模板再生成显示文字。无题面的复习追问才允许有界自由文本。Runtime 会忽略用户规则与配置、禁用已知工具特性、关闭模型工具网络和工作区写入，并拒绝任何工具事件、提交轮自由文本、未知 JSONL 事件、异常 stderr、非零退出或不合格结构化输出。临时目录在本轮结束后清理。
+
+模型档位来自 `codex debug models --bundled` 的有界可见目录，并且只接受当前已审计 CLI 版本中 exact model + reasoning effort 同时匹配的项目。Page API 只能发送 `fast / balanced / deep` 档位 ID；不能提交模型 slug、命令参数、endpoint 或 fallback。Runtime 每轮重新映射，Runner preflight 再次认证；没有合法默认档位时 Codex 保持不可选。当前预览的三档是快速（Luna / low）、均衡（Terra / medium）和深入（Sol / low），最终是否显示仍以用户本机当次目录为准。
 
 这仍然是 **unqualified personal experiment**：当前 stock Codex 可以无交互执行，但尚不能向 Digital Employee 证明完整的模型可见工具目录，也不能证明所有内建工具已从目录移除。因此页面会持续显示 `framework_adapter_status: probe_only`，不会把“能运行一次”冒充为合格 Adapter。Codex 请求由用户本机已有账号发往 OpenAI；其处理仍受该账号与 OpenAI 服务条款约束。
 

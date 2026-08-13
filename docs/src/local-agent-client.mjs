@@ -1,4 +1,4 @@
-export const LOOPBACK_PROTOCOL = "coach-loopback.v3";
+export const LOOPBACK_PROTOCOL = "coach-loopback.v4";
 export const DEFAULT_RUNTIME_ORIGIN = "http://127.0.0.1:43127";
 export const PUBLIC_COACH_ORIGIN = "https://peterguy326.github.io";
 export const RUNTIME_LAUNCH_URL = "senior-architect-pass-coach://launch";
@@ -213,6 +213,17 @@ function safeAdapter(raw) {
   if (selectable && !new Set(["ready", "experimental_personal"]).has(state)) {
     throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了矛盾的引擎可用状态。");
   }
+  const modelPreferences = Array.isArray(raw.model_preferences)
+    ? raw.model_preferences.slice(0, 8).map((entry) => ({
+      id: cleanText(entry?.id, 32),
+      label: cleanText(entry?.label, 80),
+      selectable: entry?.selectable === true,
+    })).filter((entry) => /^[a-z][a-z0-9_-]{0,31}$/u.test(entry.id) && entry.label)
+    : [];
+  const defaultModelPreference = cleanText(raw.default_model_preference, 32);
+  if (defaultModelPreference && !modelPreferences.some((entry) => entry.id === defaultModelPreference && entry.selectable)) {
+    throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了未认证的默认模型档位。");
+  }
   return Object.freeze({
     id,
     label: cleanText(raw.label ?? raw.name, 80) || id,
@@ -222,6 +233,8 @@ function safeAdapter(raw) {
     selectable,
     execution_mode: cleanText(raw.execution_mode, 64),
     framework_adapter_status: cleanText(raw.framework_adapter_status, 64),
+    model_preferences: Object.freeze(modelPreferences.map(Object.freeze)),
+    default_model_preference: defaultModelPreference || null,
   });
 }
 
@@ -669,7 +682,7 @@ export class LocalAgentClient {
     return adapter;
   }
 
-  async coach({ phase, engine, message = "", publicQuestion = null, trustedGrade = null, deidentifiedProgress } = {}) {
+  async coach({ phase, engine, modelPreference = null, message = "", publicQuestion = null, trustedGrade = null, deidentifiedProgress } = {}) {
     this.#assertConnected();
     if (!["submission", "chat"].includes(phase)) {
       throw clientError("INVALID_COACH_PHASE", "Agent 仅接受提交后讲解或自然语言问答。");
@@ -687,6 +700,11 @@ export class LocalAgentClient {
       public_question: question,
       deidentified_progress: boundedProgress(deidentifiedProgress),
     };
+    if (modelPreference !== null) {
+      const preference = cleanText(modelPreference, 32);
+      if (!/^[a-z][a-z0-9_-]{0,31}$/u.test(preference)) throw clientError("INVALID_MODEL_PREFERENCE", "模型档位无效。");
+      body.model_preference = preference;
+    }
     if (trustedGrade) body.trusted_grade = boundedGrade(trustedGrade);
     if (phase === "submission" && !trustedGrade) throw clientError("INVALID_TRUSTED_GRADE", "提交后讲解缺少可信判分。");
     if (phase === "chat") body.message = chatMessage;
@@ -699,6 +717,13 @@ export class LocalAgentClient {
     return Object.freeze({
       coaching_text: coachingText,
       engine: cleanText(result.engine ?? result.adapter_id, 64) || engineId,
+      model_preference: cleanText(result.model_preference, 32) || null,
+      stages: Object.freeze(Array.isArray(result.stages)
+        ? result.stages.slice(0, 8).map((stage) => Object.freeze({
+          id: cleanText(stage?.id, 64),
+          status: cleanText(stage?.status, 32),
+        })).filter((stage) => /^[a-z][a-z0-9_-]{0,63}$/u.test(stage.id) && stage.status === "completed")
+        : []),
     });
   }
 

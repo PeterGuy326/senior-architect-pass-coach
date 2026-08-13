@@ -154,13 +154,14 @@
                 autocomplete="off"
                 autocapitalize="characters"
                 spellcheck="false"
+                enterkeyhint="send"
                 placeholder="输入 A–H；多选可输入 AC 或 A,C"
                 aria-describedby="answer-hint answer-error"
                 disabled
               ></textarea>
               <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
             </div>
-            <p class="answer-hint" id="answer-hint">直接作答即可。私教会先按题目长短计算参考用时，再用实际前台有效用时自动判断；交卷后会显示本题的时间依据。</p>
+            <p class="answer-hint" id="answer-hint"><strong>Enter 发送 · Shift + Enter 换行。</strong> 直接作答即可；私教会按题目长短计算参考用时，再按实际前台有效用时自动判断，交卷后显示时间依据。</p>
             <p class="form-error" id="answer-error" role="alert"></p>
           </form>
         </section>
@@ -228,7 +229,7 @@
         <a
           class="source-link"
           id="runtime-install-link"
-          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.6.0-preview.1"
+          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.1"
           rel="noreferrer"
         >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
         <button class="secondary-action" id="runtime-connect" type="button">检测全部本机 Agent</button>
@@ -240,6 +241,16 @@
           <span class="engine-card__detail">固定题库、固定答案键、浏览器私人进度；不调用模型。</span>
         </button>
       </div>
+      <section class="model-profile-panel" id="model-profile-panel" aria-labelledby="model-profile-title" hidden>
+        <div class="model-profile-panel__heading">
+          <div>
+            <p class="folio">Codex 模型档位</p>
+            <h3 id="model-profile-title">选择下一轮的响应速度</h3>
+          </div>
+          <p>只显示本机 Codex 本次实际核验可用的模型；切换不会修改学习档案。</p>
+        </div>
+        <div class="model-profile-list" id="model-profile-list" role="radiogroup" aria-label="Codex 模型档位"></div>
+      </section>
       <p class="engine-dialog__foot" id="engine-dialog-status" role="status">当前：基础私教</p>
     </dialog>
 

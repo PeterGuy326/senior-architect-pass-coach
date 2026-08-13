@@ -15,9 +15,15 @@ import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validato
 
 export const CODEX_PERSONAL_MODE = "codex-personal-experimental";
 export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0"]);
+export const CODEX_MODEL_PREFERENCE_DEFINITIONS = Object.freeze([
+  Object.freeze({ id: "fast", label: "快速", model: "gpt-5.6-luna", reasoning_effort: "low" }),
+  Object.freeze({ id: "balanced", label: "均衡", model: "gpt-5.6-terra", reasoning_effort: "medium" }),
+  Object.freeze({ id: "deep", label: "深入", model: "gpt-5.6-sol", reasoning_effort: "low" }),
+]);
 
 const DEFAULT_DEADLINE_MS = 120_000;
 const DEFAULT_STDOUT_LIMIT = 256 * 1024;
+const MODEL_CATALOG_LIMIT = 1024 * 1024;
 const DEFAULT_STDERR_LIMIT = 32 * 1024;
 const DEFAULT_PROMPT_LIMIT = 128 * 1024;
 const PROBE_OUTPUT_LIMIT = 8 * 1024;
@@ -389,6 +395,24 @@ function probeResult(status, { version, reasonCodes = [] } = {}) {
   };
 }
 
+export function attestCodexModelPreferences(stdout) {
+  if (typeof stdout !== "string" || Buffer.byteLength(stdout, "utf8") > MODEL_CATALOG_LIMIT) return [];
+  let parsed;
+  try { parsed = JSON.parse(stdout); } catch { return []; }
+  if (!parsed || !Array.isArray(parsed.models) || parsed.models.length > 256) return [];
+  const visible = new Map();
+  for (const model of parsed.models) {
+    if (!model || model.visibility !== "list") continue;
+    const efforts = Array.isArray(model.supported_reasoning_levels)
+      ? new Set(model.supported_reasoning_levels.map((entry) => entry?.effort))
+      : new Set();
+    if (typeof model.slug === "string") visible.set(model.slug, efforts);
+  }
+  return CODEX_MODEL_PREFERENCE_DEFINITIONS
+    .filter((entry) => visible.get(entry.model)?.has(entry.reasoning_effort))
+    .map((entry) => ({ ...entry, selectable: true }));
+}
+
 /** Probe only executable version and saved-login status; no model is invoked. */
 export async function probeCodexPersonalMode({
   command = "codex",
@@ -400,6 +424,7 @@ export async function probeCodexPersonalMode({
   filesystem = defaultFilesystem,
   timeoutMs = 8_000,
   signal,
+  includeCommandSurface = true,
 } = {}) {
   const codexHome = sourceCodexHome(environment, homeDirectory, userCodexHome);
   const savedAuthFile = path.resolve(authFile || path.join(codexHome, "auth.json"));
@@ -452,31 +477,52 @@ export async function probeCodexPersonalMode({
     });
   }
 
-  let helpResult;
+  if (includeCommandSurface) {
+    let helpResult;
+    try {
+      helpResult = await processRunner({
+        command,
+        args: ["exec", "--help"],
+        env,
+        stdin: "",
+        signal,
+        timeoutMs,
+        maxStdoutBytes: PROBE_OUTPUT_LIMIT,
+        maxStderrBytes: PROBE_OUTPUT_LIMIT,
+      });
+    } catch (error) {
+      if (signal?.aborted || error?.code === "CODEX_PERSONAL_CANCELLED") throw error;
+      return probeResult("incompatible", {
+        version,
+        reasonCodes: ["codex_command_surface_unsupported"],
+      });
+    }
+    const helpText = `${helpResult?.stdout || ""}\n${helpResult?.stderr || ""}`;
+    if (helpResult?.exitCode !== 0 || REQUIRED_EXEC_HELP_MARKERS.some((marker) => !helpText.includes(marker))) {
+      return probeResult("incompatible", {
+        version,
+        reasonCodes: ["codex_command_surface_unsupported"],
+      });
+    }
+  }
+
+  let modelPreferences = [];
   try {
-    helpResult = await processRunner({
+    const catalogResult = await processRunner({
       command,
-      args: ["exec", "--help"],
+      args: ["debug", "models", "--bundled"],
       env,
       stdin: "",
       signal,
       timeoutMs,
-      maxStdoutBytes: PROBE_OUTPUT_LIMIT,
+      maxStdoutBytes: MODEL_CATALOG_LIMIT,
       maxStderrBytes: PROBE_OUTPUT_LIMIT,
     });
+    if (catalogResult?.exitCode === 0 && !catalogResult?.stderr?.trim()) {
+      modelPreferences = attestCodexModelPreferences(catalogResult.stdout);
+    }
   } catch (error) {
     if (signal?.aborted || error?.code === "CODEX_PERSONAL_CANCELLED") throw error;
-    return probeResult("incompatible", {
-      version,
-      reasonCodes: ["codex_command_surface_unsupported"],
-    });
-  }
-  const helpText = `${helpResult?.stdout || ""}\n${helpResult?.stderr || ""}`;
-  if (helpResult?.exitCode !== 0 || REQUIRED_EXEC_HELP_MARKERS.some((marker) => !helpText.includes(marker))) {
-    return probeResult("incompatible", {
-      version,
-      reasonCodes: ["codex_command_surface_unsupported"],
-    });
   }
 
   let loginResult;
@@ -504,10 +550,17 @@ export async function probeCodexPersonalMode({
       reasonCodes: ["codex_login_required"],
     });
   }
-  return probeResult("ready", {
+  return {
+    ...probeResult("ready", {
     version,
-    reasonCodes: ["personal_saved_login_reused"],
-  });
+    reasonCodes: [
+      "personal_saved_login_reused",
+      ...(modelPreferences.length ? [] : ["codex_model_catalog_unavailable"]),
+    ],
+    }),
+    model_preferences: modelPreferences,
+    default_model_preference: modelPreferences[0]?.id || null,
+  };
 }
 
 function exactObject(value, label) {
@@ -858,7 +911,7 @@ function employeeOutputFromTrustedInput(input, coachingText) {
   };
 }
 
-function codexArguments({ schemaPath, workspace, model }) {
+function codexArguments({ schemaPath, workspace, model, reasoningEffort }) {
   const args = [
     "--ask-for-approval",
     "never",
@@ -885,6 +938,7 @@ function codexArguments({ schemaPath, workspace, model }) {
   ];
   for (const feature of CODEX_DISABLED_FEATURES) args.push("--disable", feature);
   if (model) args.push("--model", model);
+  if (reasoningEffort) args.push("-c", `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`);
   args.push(
     "--output-schema",
     schemaPath,
@@ -953,6 +1007,7 @@ export class CodexPersonalRunner {
     maxStderrBytes = DEFAULT_STDERR_LIMIT,
     maxPromptBytes = DEFAULT_PROMPT_LIMIT,
     model,
+    reasoningEffort,
     personalAuthConsent = false,
     validateInput = validateEmployeeInput,
     validateOutput = validateEmployeeOutput,
@@ -968,6 +1023,9 @@ export class CodexPersonalRunner {
     if (model !== undefined && (typeof model !== "string" || model.trim().length === 0)) {
       throw new TypeError("model_must_be_nonempty_string");
     }
+    if (reasoningEffort !== undefined && !new Set(["low", "medium", "high"]).has(reasoningEffort)) {
+      throw new TypeError("reasoningEffort_invalid");
+    }
     this.command = command;
     this.processRunner = processRunner;
     this.probe = probe;
@@ -982,6 +1040,7 @@ export class CodexPersonalRunner {
     this.maxStderrBytes = maxStderrBytes;
     this.maxPromptBytes = maxPromptBytes;
     this.model = model?.trim();
+    this.reasoningEffort = reasoningEffort;
     this.personalAuthConsent = personalAuthConsent === true;
     this.validateInput = validateInput;
     this.validateOutput = validateOutput;
@@ -999,6 +1058,7 @@ export class CodexPersonalRunner {
       authFile: this.authFile,
       filesystem: this.filesystem,
       signal,
+      includeCommandSurface: true,
     });
     this.probeState = result;
     if (result?.qualified_adapter !== false || result?.adapter_status !== "experimental_personal") {
@@ -1009,6 +1069,13 @@ export class CodexPersonalRunner {
     }
     if (result.status !== "ready" || result.available !== true) {
       throw runnerError("CODEX_PERSONAL_UNAVAILABLE", "本机 Codex CLI 当前不可用。 ");
+    }
+    if (!this.model || !this.reasoningEffort || !result.model_preferences?.some((entry) => (
+      entry?.selectable === true
+      && entry.model === this.model
+      && entry.reasoning_effort === this.reasoningEffort
+    ))) {
+      throw runnerError("CODEX_PERSONAL_MODEL_NOT_ATTESTED", "所选 Codex 模型档位不在本次本机认证目录中。 ");
     }
     return { ...result, consent_required: !this.personalAuthConsent };
   }
@@ -1028,7 +1095,7 @@ export class CodexPersonalRunner {
         "Codex 个人实验模式只接受提交后讲解或无题面复习追问。",
       );
     }
-    if (!this.probeState || this.probeState.status !== "ready") await this.preflight({ signal });
+    await this.preflight({ signal });
     const prompt = teachingPrompt(input, this.maxPromptBytes);
     const outputSchema = input.action === "submit"
       ? SUBMIT_COACHING_PLAN_SCHEMA
@@ -1052,6 +1119,7 @@ export class CodexPersonalRunner {
           schemaPath: isolated.schemaPath,
           workspace: isolated.workspace,
           model: this.model,
+          reasoningEffort: this.reasoningEffort,
         }),
         cwd: isolated.workspace,
         env: environment,
