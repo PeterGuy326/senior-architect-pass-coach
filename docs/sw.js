@@ -1,4 +1,4 @@
-const CACHE_NAME = "architect-pass-coach-pages-v12";
+const CACHE_NAME = "architect-pass-coach-pages-v13";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
@@ -46,15 +46,33 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/v1/")) return;
 
+  const network = fetch(request).then((response) => {
+    const cacheControl = String(response.headers.get("cache-control") || "").toLowerCase();
+    const vary = String(response.headers.get("vary") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const cacheable = response.status === 200
+      && response.type !== "error"
+      && response.type !== "opaque"
+      && request.cache !== "no-store"
+      && !request.headers.has("range")
+      && !/(?:^|,)\s*no-store(?:\s*(?:,|$))/u.test(cacheControl)
+      && !vary.includes("*");
+    return { response, cacheCopy: cacheable ? response.clone() : null };
+  });
+
+  event.waitUntil(
+    network
+      .then(({ cacheCopy }) => (
+        cacheCopy ? caches.open(CACHE_NAME).then((cache) => cache.put(request, cacheCopy)) : undefined
+      ))
+      .catch(() => undefined),
+  );
+
   event.respondWith(
-    fetch(request)
-      .then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)));
-        }
-        return response;
-      })
+    network
+      .then(({ response }) => response)
       .catch(async () => {
         const cached = await caches.match(request);
         if (cached) return cached;

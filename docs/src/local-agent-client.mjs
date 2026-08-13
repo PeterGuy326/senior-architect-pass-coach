@@ -721,28 +721,40 @@ export class LocalAgentClient {
       headers.Authorization = `Bearer ${this.#token}`;
     }
     if (method !== "GET") headers["Idempotency-Key"] = String(this.#idFactory()).slice(0, 160);
+    const serializedBody = body === undefined ? undefined : JSON.stringify(cloneJson(body));
+    const maximumAttempts = pathname === "/v1/coach" && method === "POST" ? 2 : 1;
     let response;
-    try {
-      response = await this.#fetch(url.href, {
-        method,
-        mode: "cors",
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(cloneJson(body)),
-        credentials: "omit",
-        cache: "no-store",
-        redirect: "error",
-        // Keep targetAddressSpace unset for the pinned 127.0.0.1 literal.
-        // Current LNA distinguishes loopback from the "local" address space;
-        // declaring "local" here makes Chromium reject the resolved loopback.
-      });
-    } catch {
-      throw clientError("RUNTIME_UNREACHABLE", "本机 Agent Runtime 暂时无法连接。");
+    let text;
+    for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+      try {
+        response = await this.#fetch(url.href, {
+          method,
+          mode: "cors",
+          headers,
+          body: serializedBody,
+          credentials: "omit",
+          cache: "no-store",
+          redirect: "error",
+          // Keep targetAddressSpace unset for the pinned 127.0.0.1 literal.
+          // Current LNA distinguishes loopback from the "local" address space;
+          // declaring "local" here makes Chromium reject the resolved loopback.
+        });
+        const declaredLength = Number(response.headers?.get?.("content-length"));
+        if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+          throw clientError("RUNTIME_RESPONSE_TOO_LARGE", "本机 Runtime 响应超过安全上限。");
+        }
+        text = await response.text();
+        break;
+      } catch (error) {
+        if (error?.code === "RUNTIME_RESPONSE_TOO_LARGE") throw error;
+        if (attempt + 1 < maximumAttempts) continue;
+        if (authenticated) this.disconnect();
+        throw clientError(
+          "RUNTIME_UNREACHABLE",
+          "本机 Agent 连接中断，请重新点击目标 Agent；学习进度没有改变。",
+        );
+      }
     }
-    const declaredLength = Number(response.headers?.get?.("content-length"));
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-      throw clientError("RUNTIME_RESPONSE_TOO_LARGE", "本机 Runtime 响应超过安全上限。");
-    }
-    const text = await response.text();
     if (text.length > MAX_RESPONSE_BYTES) throw clientError("RUNTIME_RESPONSE_TOO_LARGE", "本机 Runtime 响应超过安全上限。");
     let result = {};
     try {
@@ -753,6 +765,7 @@ export class LocalAgentClient {
     if (!response.ok) {
       const rawReason = cleanText(result?.reason_code, 80);
       const reason = /^[a-z0-9_]{1,80}$/u.test(rawReason) ? rawReason : "runtime_request_failed";
+      if (reason === "authentication_required") this.disconnect();
       throw clientError(
         reason,
         RUNTIME_REASON_MESSAGES[reason] || "本机 Runtime 拒绝了本次请求；固定私教仍可使用。",

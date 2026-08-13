@@ -689,6 +689,137 @@ test("Runtime bearer stays inside client memory and is absent from URLs, bodies,
   ]);
 });
 
+test("a broken coach response body retries once with the exact same idempotency key", async () => {
+  const token = "r".repeat(43);
+  const coachCalls = [];
+  let bodyReads = 0;
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "stable-agent-turn-key",
+    fetchImpl: async (url, options) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "retry-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) {
+        return jsonResponse(catalogResponse([
+          { id: "qwen-code", label: "Qwen Code", state: "ready", selectable: true },
+        ]));
+      }
+      coachCalls.push({
+        key: options.headers["Idempotency-Key"],
+        body: options.body,
+      });
+      bodyReads += 1;
+      if (bodyReads === 1) {
+        return {
+          headers: new Headers(),
+          status: 200,
+          ok: true,
+          async text() { throw new TypeError("Failed to fetch"); },
+        };
+      }
+      return jsonResponse({
+        protocol: LOOPBACK_PROTOCOL,
+        engine: "qwen-code",
+        coaching_text: "已从同一请求收据恢复回答。",
+      });
+    },
+  });
+  await client.connect();
+  const result = await client.coach({
+    phase: "chat",
+    engine: "qwen-code",
+    message: "请恢复本次回答",
+    deidentifiedProgress: {
+      schema_version: "deidentified-progress.v1",
+      score_goal: { pass_line: 45, safety_target: 52 },
+      knows_progress: false,
+      evidence_count: 0,
+      subjects: {},
+    },
+  });
+  assert.equal(result.coaching_text, "已从同一请求收据恢复回答。");
+  assert.equal(coachCalls.length, 2);
+  assert.equal(coachCalls[0].key, "stable-agent-turn-key");
+  assert.equal(coachCalls[1].key, coachCalls[0].key);
+  assert.equal(coachCalls[1].body, coachCalls[0].body);
+  assert.equal(client.connected, true);
+});
+
+test("repeated native response-stream failures disconnect and never expose browser English", async () => {
+  const token = "n".repeat(43);
+  let coachCalls = 0;
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "native-network-error-key",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "broken-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) return jsonResponse(catalogResponse());
+      coachCalls += 1;
+      return {
+        headers: new Headers(),
+        status: 200,
+        ok: true,
+        async text() { throw new DOMException("Failed to fetch", "NetworkError"); },
+      };
+    },
+  });
+  await client.connect();
+  await assert.rejects(client.coach({
+    phase: "chat",
+    engine: "qwen-code",
+    message: "不要泄漏原始浏览器错误",
+    deidentifiedProgress: {
+      schema_version: "deidentified-progress.v1",
+      score_goal: { pass_line: 45, safety_target: 52 },
+      knows_progress: false,
+      evidence_count: 0,
+      subjects: {},
+    },
+  }), (error) => {
+    assert.equal(error.code, "RUNTIME_UNREACHABLE");
+    assert.match(error.message, /连接中断.*重新点击目标 Agent/u);
+    assert.doesNotMatch(error.message, /Failed to fetch/u);
+    return true;
+  });
+  assert.equal(coachCalls, 2);
+  assert.equal(client.connected, false);
+});
+
+test("authentication expiry clears the in-memory Runtime connection", async () => {
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "expired-grant-request",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "e".repeat(43), instance_id: "expired-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) return jsonResponse(catalogResponse());
+      return jsonResponse({
+        protocol: LOOPBACK_PROTOCOL,
+        status: "error",
+        reason_code: "authentication_required",
+      }, 401);
+    },
+  });
+  await client.connect();
+  await assert.rejects(client.coach({
+    phase: "chat",
+    engine: "qwen-code",
+    message: "授权是否仍然有效",
+    deidentifiedProgress: {
+      schema_version: "deidentified-progress.v1",
+      score_goal: { pass_line: 45, safety_target: 52 },
+      knows_progress: false,
+      evidence_count: 0,
+      subjects: {},
+    },
+  }), { code: "authentication_required" });
+  assert.equal(client.connected, false);
+});
+
 test("Codex personal consent is explicit, memory-only, and returns an experimental selectable state", async () => {
   const token = "c".repeat(43);
   const calls = [];
