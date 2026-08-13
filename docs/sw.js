@@ -1,4 +1,4 @@
-const CACHE_NAME = "architect-pass-coach-pages-v15";
+const CACHE_NAME = "architect-pass-coach-pages-v16";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
@@ -7,6 +7,9 @@ const CORE_ASSETS = Object.freeze([
   "./assets/app.css",
   "./src/app.mjs",
   "./src/chat-view.mjs",
+  "./src/harness-actions.mjs",
+  "./src/harness-action-router.mjs",
+  "./src/dialog-interaction.mjs",
   "./src/harness.mjs",
   "./src/local-agent-client.mjs",
   "./src/pair.mjs",

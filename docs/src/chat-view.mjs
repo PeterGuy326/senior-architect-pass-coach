@@ -1,3 +1,5 @@
+import { HARNESS_ACTION_GROUPS, harnessActionChoices } from "./harness-actions.mjs";
+
 const STATE_LABELS = Object.freeze({
   cold_start: "等待建档",
   ready: "档案已就绪",
@@ -230,6 +232,14 @@ export function createChatView({
   let selected = new Set();
   let currentQuestion = null;
   let agentChatAvailable = false;
+  let activeSuggestionGroup = null;
+
+  function expireSuggestionGroup() {
+    if (!activeSuggestionGroup) return;
+    activeSuggestionGroup.dataset.expired = "true";
+    for (const oldButton of activeSuggestionGroup.querySelectorAll("button")) oldButton.disabled = true;
+    activeSuggestionGroup = null;
+  }
 
   function appendMessage(role, { paragraphs = [], question, timing, annotation, action, suggestions = [] } = {}) {
     const item = node("li", `message message--${role}`);
@@ -287,19 +297,33 @@ export function createChatView({
       paper.append(button);
     }
 
-    const safeSuggestions = (Array.isArray(suggestions) ? suggestions : [])
-      .filter((suggestion) => asText(suggestion?.label) && asText(suggestion?.value))
-      .slice(0, 3);
+    const safeSuggestions = harnessActionChoices(suggestions);
     if (safeSuggestions.length && typeof onSuggestion === "function") {
+      expireSuggestionGroup();
       const suggestionGroup = node("div", "coach-suggestions");
-      suggestionGroup.setAttribute("aria-label", "私教建议追问");
+      suggestionGroup.setAttribute("aria-label", "选择下一步");
+      activeSuggestionGroup = suggestionGroup;
       for (const suggestion of safeSuggestions) {
         const button = node("button", "coach-suggestion", suggestion.label);
         button.type = "button";
-        button.addEventListener("click", () => {
+        let pending = false;
+        let settled = false;
+        button.addEventListener("click", async () => {
+          if (pending || settled) return;
+          pending = true;
           for (const peer of suggestionGroup.querySelectorAll("button")) peer.disabled = true;
-          onSuggestion(suggestion.value);
-        }, { once: true });
+          let handled = false;
+          try {
+            handled = await onSuggestion(suggestion.id) !== false;
+          } catch {
+            handled = false;
+          }
+          pending = false;
+          settled = handled;
+          if (!settled) {
+            for (const peer of suggestionGroup.querySelectorAll("button")) peer.disabled = false;
+          }
+        });
         suggestionGroup.append(button);
       }
       paper.append(suggestionGroup);
@@ -441,6 +465,7 @@ export function createChatView({
   }
 
   function clear() {
+    expireSuggestionGroup();
     for (const timer of activeProcessTimers) globalThis.clearInterval(timer);
     activeProcessTimers.clear();
     replaceChildren(timeline);
@@ -576,6 +601,7 @@ export function createChatView({
       setComposer({ enabled: true, answering: state === "awaiting_answer", busy: BUSY_STATES.has(state) });
       return;
     }
+    expireSuggestionGroup();
     renderedKeys.add(key);
 
     if (state === "loading" || state === "generating_question") {
@@ -604,19 +630,14 @@ export function createChatView({
       });
       const proactive = (view?.agent?.proactive_suggestions || [])[0];
       if (asText(proactive?.prompt)) {
-        appendCoach([`主动追问：${asText(proactive.prompt).slice(0, 160)}`], {
+        appendCoach([
+          `主动追问：${asText(proactive.prompt).slice(0, 160)}`,
+          "不想手输时，直接选择你现在更接近的状态；它只用于继续讲解，不会被当作掌握证据。",
+        ], {
           annotation: agentChatAvailable
-            ? "Harness 根据本题证据主动发问 · 直接在输入框回答，所选 Agent 会继续追问"
+            ? "Harness 根据本题证据主动发问 · 点击选项会立即进入下一轮，也可在输入框写完整回答"
             : "Harness 根据本题证据主动发问 · 可先口头复述；连接 Agent 后可继续追问",
-          action: agentChatAvailable
-            ? {
-              label: "回答这道追问",
-              onClick: () => onSuggestion?.({
-                id: asText(proactive.id).slice(0, 64),
-                prompt: asText(proactive.prompt).slice(0, 160),
-              }),
-            }
-            : null,
+          suggestions: agentChatAvailable ? HARNESS_ACTION_GROUPS.proactive_answer : [],
         });
       }
       setComposer({ enabled: true });
@@ -658,6 +679,7 @@ export function createChatView({
       renderedAgentKeys.add(key);
       appendCoach([text], {
         annotation: `讲解引擎 ${engine}${modelPreference ? ` · ${modelPreference}` : ""} · 判分固定答案键`,
+        suggestions: HARNESS_ACTION_GROUPS.feedback_coaching,
       });
     } else if (failure?.message) {
       const engine = asText(view.agent?.preference, "本机 Agent").slice(0, 64);

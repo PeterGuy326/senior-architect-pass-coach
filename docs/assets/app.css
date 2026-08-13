@@ -804,23 +804,30 @@ textarea[disabled] {
 }
 
 .coach-suggestion {
-  padding: 0.42rem 0.66rem;
+  position: relative;
+  padding: 0.55rem 1.8rem 0.55rem 0.72rem;
   color: #315e55;
   font-size: 0.74rem;
   font-weight: 700;
+  text-align: left;
   cursor: pointer;
   background: rgba(220, 232, 223, 0.55);
   border: 1px solid rgba(76, 117, 108, 0.58);
 }
 
 .coach-suggestion::after {
-  margin-left: 0.35rem;
-  content: "↗";
+  position: absolute;
+  right: 0.65rem;
+  content: "→";
 }
 
 .coach-suggestion:hover:not([disabled]) {
   color: var(--white);
   background: var(--jade);
+}
+
+.coach-suggestions[data-expired="true"] {
+  opacity: 0.62;
 }
 
 .message--system .message__paper {
@@ -1222,6 +1229,11 @@ textarea[disabled] {
   cursor: pointer;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.dialog-close:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .engine-dialog__intro,

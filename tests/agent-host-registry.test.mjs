@@ -21,6 +21,7 @@ test("the coach catalog declares six engines including a truthful Hermes entry",
 
 test("the disconnected Pages catalog stays in exact ID parity with the Runtime catalog", async () => {
   const source = await readFile(new URL("../docs/src/app.mjs", import.meta.url), "utf8");
+  const actionRouter = await readFile(new URL("../docs/src/harness-action-router.mjs", import.meta.url), "utf8");
   const catalogSource = source.slice(
     source.indexOf("const STATIC_AGENT_CATALOG"),
     source.indexOf("const ADAPTER_STATE_LABELS"),
@@ -42,9 +43,11 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /DIRECT_CONNECT_AGENT_IDS\s*=\s*new Set\(\["claude-code", "codex", "qwen-code", "codebuddy"\]\)/u);
   assert.match(source, /return connectRuntime\(\{ preferredEngine: engine \}\)/u);
   assert.match(source, /selectEngine\(preferredEngine, \{ enterConversation: true \}\)/u);
-  assert.match(source, /elements\.engineDialog\.close\(\)/u);
+  assert.match(source, /requestEngineDialogClose\(\{ focusTarget: elements\.input \}\)/u);
   assert.match(source, /elements\.input\.focus\(\{ preventScroll: true \}\)/u);
-  assert.match(source, /选择 Agent 不会自动发送消息/u);
+  assert.match(source, /HARNESS_ACTION_GROUPS\.agent_entry/u);
+  assert.match(source, /handleHarnessAction\(actionId\)/u);
+  assert.match(actionRouter, /作答前 Agent 不会介入题面或答案判断/u);
   const entryConversationSource = source.slice(
     source.indexOf("async function enterAgentConversation"),
     source.indexOf("async function selectEngine"),
@@ -64,16 +67,21 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /process\.advance\("agent"/u);
   assert.match(source, /process\.advance\("contract"/u);
   assert.match(source, /仅在浏览器内整理当前教学上下文/u);
-  assert.match(source, /让私教反问我/u);
-  assert.match(source, /安排专项训练/u);
+  assert.match(source, /HARNESS_ACTION_GROUPS\.agent_reply/u);
+  assert.match(source, /HARNESS_ACTION_GROUPS\.agent_reply_feedback/u);
   assert.match(source, /modelProfilePanel/u);
   assert.match(source, /setAgentModelPreference/u);
   assert.match(source, /从下一轮开始生效/u);
   assert.match(source, /button\.tabIndex = profile\.id === selectedModelPreference \? 0 : -1/u);
   assert.match(source, /"ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"/u);
-  assert.match(source, /onSuggestion:\s*async \(suggestion\)/u);
-  assert.match(source, /coach\.acceptProactiveSuggestion\(suggestion\.id\)/u);
-  assert.match(source, /回答刚才的主动追问；Enter 发送/u);
+  assert.match(source, /onSuggestion:\s*async \(actionId\)/u);
+  assert.match(source, /shouldDismissDialog/u);
+  assert.match(source, /pointerStartedOnBackdrop/u);
+  assert.match(source, /answerSurfaceVisible/u);
+  assert.match(source, /engineDialog\.setAttribute\("aria-busy", busy \? "true" : "false"\)/u);
+  assert.match(source, /engineDialogClose\.disabled = busy/u);
+  assert.match(source, /function renderEngineList\(\)[\s\S]*syncDialogBusy\(\)/u);
+  assert.match(actionRouter, /action\.operation === "focus-answer"/u);
   assert.match(source, /event\.key !== "Enter" \|\| event\.shiftKey \|\| event\.isComposing/u);
   assert.match(source, /elements\.answerForm\.requestSubmit\(\)/u);
   const html = await readFile(new URL("../docs/index.html", import.meta.url), "utf8");
@@ -84,6 +92,8 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(html, /enterkeyhint="send"/u);
   assert.match(html, /Enter 发送 · Shift \+ Enter 换行/u);
   assert.match(html, /选择下一轮的响应速度/u);
+  assert.match(html, /id="engine-dialog-close"/u);
+  assert.match(html, /aria-describedby="runtime-context engine-dialog-status"/u);
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
   assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
   assert.match(css, /\.engine-card\[data-engine-entry="direct"\]/u);
@@ -93,7 +103,10 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v15/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v16/u);
+  assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
+  assert.match(serviceWorker, /\.\/src\/harness-action-router\.mjs/u);
+  assert.match(serviceWorker, /\.\/src\/dialog-interaction\.mjs/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {
