@@ -132,7 +132,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "架构过线私教 Local Agent Runtime $GITHUB_REF_NAME" \
-            --notes "无需 clone、npm install 或编译：下载对应系统压缩包即可。macOS 首次打开会登记一个无参数、无秘密的 launch-only 入口；之后考生可从正式 GitHub Pages 点击“连接本机 Agent”，网页先探活，必要时唤起应用，Runtime 再密封并绑定 Digital Employee 工作区，确认后即可选择通过检查的引擎。Linux x64（glibc 2.28+）本轮仍需先运行 start-local-coach，不适用于 Alpine/musl。原学习档案始终留在 Pages 浏览器，无需迁移。可用同页 SHA256SUMS 核对文件完整性。当前 macOS 包为未 notarize 的开源预览版，ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书；若 Finder 右键“打开”仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”。Agent CLI 与模型凭证不会打包。Claude、Qwen、CodeBuddy 只有 Digital Employee 对本机 Host、服务凭证和员工包能力检查都通过时才可选择；Codex 另提供明确标注的个人实验模式，当前仅开放已审计的 Codex CLI 0.146.0，要求本机已有 ChatGPT / Codex 登录并在当前内存授权中再次同意，框架状态仍为 probe-only。" \
+            --notes "无需 clone、npm install 或编译：下载对应系统压缩包即可。macOS 首次打开会登记一个无参数、无秘密的 launch-only 入口；之后考生可从正式 GitHub Pages 点击“连接本机 Agent”，网页先探活，必要时唤起应用，Runtime 再密封并绑定 Digital Employee 工作区，确认后即可选择通过检查的引擎。Linux x64（glibc 2.28+）本轮仍需先运行 start-local-coach，不适用于 Alpine/musl。原学习档案始终留在 Pages 浏览器，无需迁移。可用同页 SHA256SUMS 核对文件完整性。当前 macOS 包为未 notarize 的开源预览版，ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书；若 Finder 右键“打开”仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”。Agent CLI 与模型凭证不会打包。Claude、Qwen、CodeBuddy 只有 Digital Employee 对本机 Host、服务凭证和员工包能力检查都通过时才可选择；Codex 另提供明确标注的个人实验模式，当前仅开放已审计的 Codex CLI 0.146.0，要求本机已有 ChatGPT / Codex 登录并在当前内存授权中再次同意，框架状态仍为 probe-only。本预览新增可选的轻量档，并将每轮重复的 Codex 安全探测收敛为一次紧邻执行的完整认证；快速档仍是实测默认，页面不会把较弱模型冒充成必然更快。" \
             --generate-notes \
             --draft
           gh release edit "$GITHUB_REF_NAME" \

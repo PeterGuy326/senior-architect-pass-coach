@@ -51,7 +51,7 @@ Runtime 不会把 Agent CLI 一起打包，也不会从网页收集 API Key。Di
 
 Codex 个人实验模式不会复制或记录 `auth.json` 内容。每轮只在 owner-only 临时目录放置一个指向现有登录文件的短生命周期链接，以一次性 `codex exec --ephemeral --json --output-schema` 执行；教学 Prompt 经 stdin 发送，不进入命令行参数。它不参与出题。提交后只向模型投影科目、考点、掌握结果和去身份化进度，不发送题干、选项、作答、参考答案或解析；模型只能选择枚举化补救计划，本地模板再生成显示文字。无题面的复习追问才允许有界自由文本。Runtime 会忽略用户规则与配置、禁用已知工具特性、关闭模型工具网络和工作区写入，并拒绝任何工具事件、提交轮自由文本、未知 JSONL 事件、异常 stderr、非零退出或不合格结构化输出。临时目录在本轮结束后清理。
 
-模型档位来自 `codex debug models --bundled` 的有界可见目录，并且只接受当前已审计 CLI 版本中 exact model + reasoning effort 同时匹配的项目。Page API 只能发送 `fast / balanced / deep` 档位 ID；不能提交模型 slug、命令参数、endpoint 或 fallback。Runtime 每轮重新映射，Runner preflight 再次认证；没有合法默认档位时 Codex 保持不可选。当前预览的三档是快速（Luna / low）、均衡（Terra / medium）和深入（Sol / low），最终是否显示仍以用户本机当次目录为准。
+模型档位来自 `codex debug models` 针对本机已保存登录态返回的有界可见目录，并且只接受当前已审计 CLI 版本中 exact model + reasoning effort 同时匹配的项目。Page API 只能发送 `lite / fast / balanced / deep` 档位 ID；不能提交模型 slug、命令参数、endpoint 或 fallback。每轮由 Runner 做一次紧邻执行的完整认证；没有合法档位时 Codex 保持不可选。当前预览依次尝试展示轻量（GPT-5.4 mini / low）、快速（Luna / low）、均衡（Terra / medium）和深入（Sol / low），最终是否显示仍以用户本机当次目录为准。轻量档若从实时目录消失会直接不可用，不会在同一请求里静默换成其他模型。受控同提示冒烟中 Mini 并不比 Luna 快，因此仍以 `fast` 为默认；`lite` 作为用户明确选择的较弱实验档保留，不承诺一定更快。
 
 这仍然是 **unqualified personal experiment**：当前 stock Codex 可以无交互执行，但尚不能向 Digital Employee 证明完整的模型可见工具目录，也不能证明所有内建工具已从目录移除。因此页面会持续显示 `framework_adapter_status: probe_only`，不会把“能运行一次”冒充为合格 Adapter。Codex 请求由用户本机已有账号发往 OpenAI；其处理仍受该账号与 OpenAI 服务条款约束。
 

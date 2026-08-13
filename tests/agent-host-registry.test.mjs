@@ -93,7 +93,7 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v14/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v15/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

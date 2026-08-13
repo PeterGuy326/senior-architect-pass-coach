@@ -16,10 +16,12 @@ import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validato
 export const CODEX_PERSONAL_MODE = "codex-personal-experimental";
 export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0"]);
 export const CODEX_MODEL_PREFERENCE_DEFINITIONS = Object.freeze([
+  Object.freeze({ id: "lite", label: "轻量", model: "gpt-5.4-mini", reasoning_effort: "low" }),
   Object.freeze({ id: "fast", label: "快速", model: "gpt-5.6-luna", reasoning_effort: "low" }),
   Object.freeze({ id: "balanced", label: "均衡", model: "gpt-5.6-terra", reasoning_effort: "medium" }),
   Object.freeze({ id: "deep", label: "深入", model: "gpt-5.6-sol", reasoning_effort: "low" }),
 ]);
+export const DEFAULT_CODEX_MODEL_PREFERENCE = "fast";
 
 const DEFAULT_DEADLINE_MS = 120_000;
 const DEFAULT_STDOUT_LIMIT = 256 * 1024;
@@ -477,10 +479,8 @@ export async function probeCodexPersonalMode({
     });
   }
 
-  if (includeCommandSurface) {
-    let helpResult;
-    try {
-      helpResult = await processRunner({
+  const helpPromise = includeCommandSurface
+    ? processRunner({
         command,
         args: ["exec", "--help"],
         env,
@@ -489,45 +489,28 @@ export async function probeCodexPersonalMode({
         timeoutMs,
         maxStdoutBytes: PROBE_OUTPUT_LIMIT,
         maxStderrBytes: PROBE_OUTPUT_LIMIT,
-      });
-    } catch (error) {
+      }).catch((error) => {
       if (signal?.aborted || error?.code === "CODEX_PERSONAL_CANCELLED") throw error;
-      return probeResult("incompatible", {
-        version,
-        reasonCodes: ["codex_command_surface_unsupported"],
-      });
-    }
-    const helpText = `${helpResult?.stdout || ""}\n${helpResult?.stderr || ""}`;
-    if (helpResult?.exitCode !== 0 || REQUIRED_EXEC_HELP_MARKERS.some((marker) => !helpText.includes(marker))) {
-      return probeResult("incompatible", {
-        version,
-        reasonCodes: ["codex_command_surface_unsupported"],
-      });
-    }
-  }
-
-  let modelPreferences = [];
-  try {
-    const catalogResult = await processRunner({
+      return null;
+    })
+    : Promise.resolve({ exitCode: 0, stdout: REQUIRED_EXEC_HELP_MARKERS.join(" "), stderr: "" });
+  const catalogPromise = processRunner({
       command,
-      args: ["debug", "models", "--bundled"],
+      // The live catalog is still a read-only Codex CLI probe. Unlike the
+      // bundled snapshot it proves that this saved-login account can actually
+      // select the profile before every run.
+      args: ["debug", "models"],
       env,
       stdin: "",
       signal,
       timeoutMs,
       maxStdoutBytes: MODEL_CATALOG_LIMIT,
       maxStderrBytes: PROBE_OUTPUT_LIMIT,
-    });
-    if (catalogResult?.exitCode === 0 && !catalogResult?.stderr?.trim()) {
-      modelPreferences = attestCodexModelPreferences(catalogResult.stdout);
-    }
-  } catch (error) {
+    }).catch((error) => {
     if (signal?.aborted || error?.code === "CODEX_PERSONAL_CANCELLED") throw error;
-  }
-
-  let loginResult;
-  try {
-    loginResult = await processRunner({
+    return null;
+  });
+  const loginPromise = processRunner({
       command,
       args: ["login", "status"],
       env,
@@ -536,9 +519,34 @@ export async function probeCodexPersonalMode({
       timeoutMs,
       maxStdoutBytes: PROBE_OUTPUT_LIMIT,
       maxStderrBytes: PROBE_OUTPUT_LIMIT,
-    });
-  } catch (error) {
+    }).catch((error) => {
     if (signal?.aborted || error?.code === "CODEX_PERSONAL_CANCELLED") throw error;
+    return null;
+  });
+
+  // These three probes are independent and read-only. Starting them together
+  // keeps the exact same fail-closed checks without adding three serial CLI
+  // startup costs to every teaching turn.
+  const [helpResult, catalogResult, loginResult] = await Promise.all([
+    helpPromise,
+    catalogPromise,
+    loginPromise,
+  ]);
+  const helpText = `${helpResult?.stdout || ""}\n${helpResult?.stderr || ""}`;
+  if (
+    !helpResult
+    || helpResult.exitCode !== 0
+    || REQUIRED_EXEC_HELP_MARKERS.some((marker) => !helpText.includes(marker))
+  ) {
+    return probeResult("incompatible", {
+      version,
+      reasonCodes: ["codex_command_surface_unsupported"],
+    });
+  }
+  const modelPreferences = catalogResult?.exitCode === 0 && !catalogResult?.stderr?.trim()
+    ? attestCodexModelPreferences(catalogResult.stdout)
+    : [];
+  if (!loginResult) {
     return probeResult("unavailable", {
       version,
       reasonCodes: ["codex_login_probe_failed"],
@@ -559,7 +567,9 @@ export async function probeCodexPersonalMode({
     ],
     }),
     model_preferences: modelPreferences,
-    default_model_preference: modelPreferences[0]?.id || null,
+    default_model_preference: modelPreferences.some(({ id }) => id === DEFAULT_CODEX_MODEL_PREFERENCE)
+      ? DEFAULT_CODEX_MODEL_PREFERENCE
+      : (modelPreferences[0]?.id || null),
   };
 }
 
@@ -1006,8 +1016,7 @@ export class CodexPersonalRunner {
     maxStdoutBytes = DEFAULT_STDOUT_LIMIT,
     maxStderrBytes = DEFAULT_STDERR_LIMIT,
     maxPromptBytes = DEFAULT_PROMPT_LIMIT,
-    model,
-    reasoningEffort,
+    modelPreference = DEFAULT_CODEX_MODEL_PREFERENCE,
     personalAuthConsent = false,
     validateInput = validateEmployeeInput,
     validateOutput = validateEmployeeOutput,
@@ -1020,11 +1029,11 @@ export class CodexPersonalRunner {
     if (typeof validateInput !== "function" || typeof validateOutput !== "function") {
       throw new TypeError("employee_schema_validators_required");
     }
-    if (model !== undefined && (typeof model !== "string" || model.trim().length === 0)) {
-      throw new TypeError("model_must_be_nonempty_string");
-    }
-    if (reasoningEffort !== undefined && !new Set(["low", "medium", "high"]).has(reasoningEffort)) {
-      throw new TypeError("reasoningEffort_invalid");
+    if (
+      typeof modelPreference !== "string"
+      || !CODEX_MODEL_PREFERENCE_DEFINITIONS.some(({ id }) => id === modelPreference)
+    ) {
+      throw new TypeError("modelPreference_invalid");
     }
     this.command = command;
     this.processRunner = processRunner;
@@ -1039,8 +1048,9 @@ export class CodexPersonalRunner {
     this.maxStdoutBytes = maxStdoutBytes;
     this.maxStderrBytes = maxStderrBytes;
     this.maxPromptBytes = maxPromptBytes;
-    this.model = model?.trim();
-    this.reasoningEffort = reasoningEffort;
+    this.modelPreference = modelPreference;
+    this.model = null;
+    this.reasoningEffort = null;
     this.personalAuthConsent = personalAuthConsent === true;
     this.validateInput = validateInput;
     this.validateOutput = validateOutput;
@@ -1070,13 +1080,18 @@ export class CodexPersonalRunner {
     if (result.status !== "ready" || result.available !== true) {
       throw runnerError("CODEX_PERSONAL_UNAVAILABLE", "本机 Codex CLI 当前不可用。 ");
     }
-    if (!this.model || !this.reasoningEffort || !result.model_preferences?.some((entry) => (
+    const definition = CODEX_MODEL_PREFERENCE_DEFINITIONS.find(({ id }) => id === this.modelPreference);
+    const attested = result.model_preferences?.find((entry) => (
       entry?.selectable === true
-      && entry.model === this.model
-      && entry.reasoning_effort === this.reasoningEffort
-    ))) {
+      && entry.id === definition.id
+      && entry.model === definition.model
+      && entry.reasoning_effort === definition.reasoning_effort
+    ));
+    if (!attested) {
       throw runnerError("CODEX_PERSONAL_MODEL_NOT_ATTESTED", "所选 Codex 模型档位不在本次本机认证目录中。 ");
     }
+    this.model = definition.model;
+    this.reasoningEffort = definition.reasoning_effort;
     return { ...result, consent_required: !this.personalAuthConsent };
   }
 

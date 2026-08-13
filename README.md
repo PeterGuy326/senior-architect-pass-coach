@@ -54,7 +54,7 @@ Digital Employee 当前的真实兼容边界如下：
 
 - 直接在浏览器聊天：输入“今天学什么”“查看进度”“继续”“出题”，或直接提交 A–H 单选/多选答案；连接 Runtime 后还可向所选 Agent 自然语言追问；
 - Agent 调用会立即出现一张可验证的执行笺，按真实边界展示“准备允许字段 / 固定判分 / 原子提交 / 等待 Runtime / 校验输出”等过程和实际耗时；不会展示模型内部思维链、provider 原始事件或虚构进度百分比；
-- Codex 连接后只展示本机 CLI 当次实际核验可用的“快速 / 均衡 / 深入”档位；网页只提交档位 ID，Runtime 与 Runner 会在每轮重新认证 exact model 与 reasoning effort，切换仅对下一轮生效；
+- Codex 连接后只展示本机 CLI 当次实际核验可用的“轻量 / 快速 / 均衡 / 深入”档位；网页只提交档位 ID，Runner 会在每轮紧邻执行时认证一次 exact model 与 reasoning effort，切换仅对下一轮生效；
 - 客观题反馈后，Harness 会根据真实时间、改选和复测原因主动问一条有界问题；提议不会自动调用模型或写进度。对话框支持 Enter 发送、Shift+Enter 换行及中文输入法组合态防误发；
 - 从固定公开 commit 读取综合客观题，作答前只展示题干与选项，提交后才返回可信答案和解析；
 - 先按题干、选项长度与数量、否定/逻辑/数字复杂度估算正常用时；积累至少 12 条干净记录后再用个人节奏基线校正。总有效用时决定“偏快 / 正常 / 偏慢”主档位，首次选择和真实改选只会降级证据；答对且处于正常区间、计时完整、没有改选，才形成稳定掌握证据；
@@ -152,7 +152,7 @@ CLI Harness 不依赖 Host 原生 session resume。每一轮仍是 one-shot，�
 
 Local Agent Runtime 采用 Hybrid Harness：启动时用 Digital Employee 密封并固定一份只读员工工作区，员工摘要、Schema、兼容性探测和执行都绑定到同一 digest；Agent 只是可替换的大脑。出题阶段不调用模型；提交后先完成固定答案判定与浏览器进度事务，再把公开题面、可信判定和去标识化弱项摘要交给所选合格 Host，最终只投影有界的 `teaching_result.summary` 作为 coaching text。模型返回的推荐不会直接改排课，事件提案也不会由这个只读 Bridge 提交。Codex 个人实验模式遵守同一提交顺序，但采用更窄的资料投影：只把科目、考点、掌握结果和去身份化进度交给模型，模型仅选择枚举化补救计划，本地模板再渲染建议；题干、选项、作答、参考答案和解析都不会进入 Codex Prompt。它使用临时隔离目录、ephemeral `codex exec`、结构化输出，以及关闭模型工具网络与写入的 Permission Profile；Codex 自身的 OpenAI 控制面连接仍用于生成回复。它仍因 stock Codex 无法证明完整模型工具目录而不属于合格框架 Adapter。Runtime 的产品职责是工作区绑定、loopback 配对与执行，不拥有第二份网页档案。
 
-Codex 模型档位不是任意模型输入框。Runtime v4 只从已审计 Codex CLI 的本次可见目录中认证 `fast / balanced / deep`，Page 只持有这些 opaque ID；请求到达后 Runtime 与 Runner 分别重新校验一次，目录漂移或伪造档位会在 Host 调用前拒绝。过程 UI 也只投影 Harness 可验证阶段，不会把原始模型 token、工具事件或思维链送到 DOM。
+Codex 模型档位不是任意模型输入框。Runtime v4 只从已审计 Codex CLI 的本次可见目录中认证 `lite / fast / balanced / deep`，Page 只持有这些 opaque ID；请求到达后 Runner 做一次紧邻执行的完整校验，目录漂移或伪造档位会在 Host 调用前拒绝。过程 UI 也只投影 Harness 可验证阶段，不会把原始模型 token、工具事件或思维链送到 DOM。
 
 用户首先看到的是员工自己的名称、欢迎语和发布者声明；Digital Employee 作为基础设施归属，Qwen/Claude/CodeBuddy 等仅作为可替换 engine 出现在运行信息中。当前品牌 sidecar 是本项目的先行约定，通用 package presentation 已反馈到上游 [Issue #102](https://github.com/fullstack-ai-infra/digital-employee/issues/102)。
 

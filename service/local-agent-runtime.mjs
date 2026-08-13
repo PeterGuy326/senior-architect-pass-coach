@@ -10,6 +10,8 @@ import { inspectEmployeeHostCompatibility } from "@fullstack-ai-infra/digital-em
 import { DigitalEmployeeHostRunner } from "./host-runner.mjs";
 import {
   assertCodexCoachingText,
+  CODEX_MODEL_PREFERENCE_DEFINITIONS,
+  DEFAULT_CODEX_MODEL_PREFERENCE,
   CodexPersonalRunner,
   probeCodexPersonalMode,
 } from "./codex-personal-runner.mjs";
@@ -35,7 +37,7 @@ const DEFAULT_MAX_STATIC_BYTES = 8 * 1024 * 1024;
 const DEFAULT_GRANT_LIFETIME_MS = 4 * 60 * 60 * 1_000;
 const MAX_IDEMPOTENCY_RESULTS = 64;
 const MAX_BEARER_HASHES = 4;
-const PRIVATE_MODEL_BINDINGS = Symbol("private_model_bindings");
+const CODEX_MODEL_PREFERENCE_IDS = new Set(CODEX_MODEL_PREFERENCE_DEFINITIONS.map(({ id }) => id));
 const PAIR_STATIC_PATHS = new Set([
   "/pair.html",
   "/src/local-agent-client.mjs",
@@ -567,13 +569,6 @@ function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
     label,
     selectable: true,
   }));
-  const privateModelBindings = new Map(attestedPreferences.map((preference) => [
-    preference.id,
-    Object.freeze({
-      model: preference.model,
-      reasoningEffort: preference.reasoning_effort,
-    }),
-  ]));
   const requestedDefault = typeof probe?.default_model_preference === "string"
     ? probe.default_model_preference
     : null;
@@ -619,14 +614,6 @@ function publicCodexPersonalAdapter(entry, probe, { consented = false } = {}) {
     model_preferences: modelPreferences,
     default_model_preference: defaultModelPreference,
   };
-  // Provider model names and CLI controls stay Runtime-private. The Page receives
-  // only opaque, attested preference IDs and display labels.
-  Object.defineProperty(adapter, PRIVATE_MODEL_BINDINGS, {
-    value: privateModelBindings,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
   return adapter;
 }
 
@@ -813,12 +800,11 @@ export class LocalAgentRuntime {
     workspaceFactory = (options) => createLocalEmployeeWorkspace(options),
     schemaValidatorsFactory = (options) => createEmployeeSchemaValidators(options),
     codexPersonalProbe = probeCodexPersonalMode,
-    codexPersonalRunnerFactory = ({ personalAuthConsent, schemaValidators, model, reasoningEffort }) => new CodexPersonalRunner({
+    codexPersonalRunnerFactory = ({ personalAuthConsent, schemaValidators, modelPreference }) => new CodexPersonalRunner({
       personalAuthConsent,
       validateInput: schemaValidators.validateEmployeeInput,
       validateOutput: schemaValidators.validateEmployeeOutput,
-      ...(model ? { model } : {}),
-      ...(reasoningEffort ? { reasoningEffort } : {}),
+      modelPreference,
     }),
     tokenFactory = () => randomBytes(32).toString("base64url"),
     serverFactory = createServer,
@@ -1359,25 +1345,25 @@ export class LocalAgentRuntime {
       request,
       this.schemaValidators.validateEmployeeInput,
     );
-    const adapter = await this.inspect(request.engine, { grant });
-    if (!adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
-    const modelPreference = request.engine === "codex"
-      ? (request.modelPreference || adapter.default_model_preference)
+    const isCodex = request.engine === "codex";
+    if (isCodex && grant?.codexPersonalConsent !== true) {
+      throw requestError("ADAPTER_NOT_SELECTABLE");
+    }
+    const modelPreference = isCodex
+      ? (request.modelPreference || DEFAULT_CODEX_MODEL_PREFERENCE)
       : null;
-    const attestedModel = request.engine === "codex"
-      ? adapter[PRIVATE_MODEL_BINDINGS]?.get(modelPreference)
-      : null;
-    if (request.engine === "codex" && !attestedModel) {
+    if (isCodex && !CODEX_MODEL_PREFERENCE_IDS.has(modelPreference)) {
       throw requestError("INVALID_REQUEST");
     }
+    const adapter = isCodex ? null : await this.inspect(request.engine, { grant });
+    if (!isCodex && !adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
     let output;
     try {
-      const runner = request.engine === "codex"
+      const runner = isCodex
         ? this.codexPersonalRunnerFactory({
             personalAuthConsent: grant?.codexPersonalConsent === true,
             schemaValidators: this.schemaValidators,
-            model: attestedModel?.model,
-            reasoningEffort: attestedModel?.reasoningEffort,
+            modelPreference,
           })
         : this.runnerFactory({
             engine: request.engine,
@@ -1390,7 +1376,7 @@ export class LocalAgentRuntime {
       // CodexPersonalRunner.run() owns its per-turn re-attestation. Calling its
       // preflight here as well would probe the same local catalog twice before
       // every response. Qualified framework runners retain the explicit gate.
-      if (request.engine !== "codex") await runner.preflight({ signal });
+      if (!isCodex) await runner.preflight({ signal });
       output = await runner.run(input, {
         runId: `loopback-${randomUUID()}`,
         signal,

@@ -181,6 +181,7 @@ async function fixture(options = {}) {
     runnerRegistries: [],
     runnerDirectories: [],
     runs: [],
+    codexProbes: 0,
     codexPreflights: 0,
     codexRuns: [],
   };
@@ -199,7 +200,7 @@ async function fixture(options = {}) {
       },
     };
   });
-  const codexPersonalProbe = options.codexPersonalProbe || (async () => ({
+  const codexPersonalProbeImpl = options.codexPersonalProbe || (async () => ({
     mode: "codex-personal-experimental",
     engine: "codex",
     status: "ready",
@@ -211,6 +212,12 @@ async function fixture(options = {}) {
     qualified_adapter: false,
     reason_codes: ["digital_employee_adapter_unqualified", "personal_saved_login_reused"],
     model_preferences: [{
+      id: "lite",
+      label: "轻量",
+      model: "gpt-5.4-mini",
+      reasoning_effort: "low",
+      selectable: true,
+    }, {
       id: "fast",
       label: "快速",
       model: "gpt-5.6-luna",
@@ -219,11 +226,14 @@ async function fixture(options = {}) {
     }],
     default_model_preference: "fast",
   }));
-  const codexPersonalRunnerFactory = options.codexPersonalRunnerFactory || (({ personalAuthConsent, model, reasoningEffort }) => {
+  const codexPersonalProbe = async (...args) => {
+    calls.codexProbes += 1;
+    return codexPersonalProbeImpl(...args);
+  };
+  const codexPersonalRunnerFactory = options.codexPersonalRunnerFactory || (({ personalAuthConsent, modelPreference }) => {
     const preflight = async () => {
       assert.equal(personalAuthConsent, true);
-      assert.equal(model, "gpt-5.6-luna");
-      assert.equal(reasoningEffort, "low");
+      assert.equal(modelPreference, "lite");
       calls.codexPreflights += 1;
     };
     return {
@@ -677,13 +687,14 @@ test("Codex personal consent is bearer-bound, in-memory, and required before a r
   assert.equal(consented.body.adapter.state, "experimental_personal");
   assert.equal(consented.body.adapter.selectable, true);
   assert.equal(consented.body.adapter.default_model_preference, "fast");
-  assert.deepEqual(consented.body.adapter.model_preferences, [{
-    id: "fast",
-    label: "快速",
-    selectable: true,
-  }]);
+  assert.deepEqual(consented.body.adapter.model_preferences, [
+    { id: "lite", label: "轻量", selectable: true },
+    { id: "fast", label: "快速", selectable: true },
+  ]);
   assert.equal(JSON.stringify(consented.body.adapter).includes("gpt-5.6"), false);
+  assert.equal(JSON.stringify(consented.body.adapter).includes("gpt-5.4"), false);
   assert.equal(JSON.stringify(consented.body.adapter).includes("reasoning_effort"), false);
+  const probesBeforeCoach = environment.calls.codexProbes;
 
   const forgedPreference = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
     method: "POST",
@@ -706,16 +717,21 @@ test("Codex personal consent is bearer-bound, in-memory, and required before a r
       "Content-Type": "application/json",
       "Idempotency-Key": "codex-after-consent",
     },
-    body: JSON.stringify(submitBody({ engine: "codex", model_preference: "fast" })),
+    body: JSON.stringify(submitBody({ engine: "codex", model_preference: "lite" })),
   }));
   assert.equal(coaching.status, 200);
   assert.equal(coaching.body.coaching_text, "Codex personal coaching.");
   assert.equal(coaching.body.execution_mode, "personal_experimental");
   assert.equal(coaching.body.framework_adapter_status, "probe_only");
-  assert.equal(coaching.body.model_preference, "fast");
+  assert.equal(coaching.body.model_preference, "lite");
   assert.deepEqual(coaching.body.stages.map(({ id }) => id), ["request_validated", "agent_running", "output_validated"]);
   assert.equal(environment.calls.codexPreflights, 1);
   assert.equal(environment.calls.codexRuns.length, 1);
+  assert.equal(
+    environment.calls.codexProbes,
+    probesBeforeCoach,
+    "the coach turn must rely on the Runner's one fresh attestation instead of probing twice",
+  );
 });
 
 test("Codex stays unselectable when no exact model profile is attested", async (t) => {

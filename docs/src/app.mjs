@@ -237,6 +237,7 @@ function renderModelProfiles() {
     selectedModelPreference = adapter.default_model_preference || profiles[0].id;
   }
   const descriptions = Object.freeze({
+    lite: "较弱模型 · 速度因本机账号与服务负载而异",
     fast: "短问短答优先 · 本机 Runtime 已核验",
     balanced: "速度与分析平衡 · 本机 Runtime 已核验",
     deep: "复杂追问优先 · 本机 Runtime 已核验",
