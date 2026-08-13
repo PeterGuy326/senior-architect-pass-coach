@@ -83,7 +83,10 @@ test("Agent quick actions send once only when the objective permits it", async (
   assert.equal(await dispatchHarnessAction("coach-next-step", {
     state: "ready",
     agentAvailable: true,
-    askAgent: async (message) => sent.push(message),
+    askAgent: async (message) => {
+      sent.push(message);
+      return true;
+    },
   }), true);
   assert.equal(sent.length, 1);
   assert.equal(await dispatchHarnessAction("coach-next-step", {
@@ -98,4 +101,19 @@ test("Agent quick actions send once only when the objective permits it", async (
     askAgent: async (message) => sent.push(message),
   }), false);
   assert.equal(sent.length, 1);
+});
+
+test("a failed Agent quick action stays retryable and a later success settles it", async () => {
+  let attempts = 0;
+  const context = {
+    state: "ready",
+    agentAvailable: true,
+    async askAgent() {
+      attempts += 1;
+      return attempts === 2;
+    },
+  };
+  assert.equal(await dispatchHarnessAction("coach-example", context), false);
+  assert.equal(await dispatchHarnessAction("coach-example", context), true);
+  assert.equal(attempts, 2);
 });

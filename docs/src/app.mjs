@@ -1011,18 +1011,18 @@ function showHelp() {
 
 async function askAgent(raw) {
   const engine = engineDisplayName();
-  await operate(`正在请 ${engine} 结合你的弱项回答……`, async ({ process }) => {
+  const result = await operate(`正在请 ${engine} 结合你的弱项回答……`, async ({ process }) => {
     const coach = await getCoach();
     process.advance("agent", "请求已交给本机 Runtime；页面正在等待结构化回复");
-    const result = await coach.askAgent(raw);
+    const reply = await coach.askAgent(raw);
     process.advance("contract", "已收到回复；正在校验边界并准备展示");
-    chat.appendCoach([result.coaching_text], {
-      annotation: `讲解引擎 ${result.engine}${result.model_preference ? ` · ${result.model_preference}` : selectedModelProfile()?.label ? ` · ${selectedModelProfile().label}` : ""} · 本次对话不写入学习进度`,
+    chat.appendCoach([reply.coaching_text], {
+      annotation: `讲解引擎 ${reply.engine}${reply.model_preference ? ` · ${reply.model_preference}` : selectedModelProfile()?.label ? ` · ${selectedModelProfile().label}` : ""} · 本次对话不写入学习进度`,
       suggestions: currentView?.state === "feedback"
         ? HARNESS_ACTION_GROUPS.agent_reply_feedback
         : HARNESS_ACTION_GROUPS.agent_reply,
     });
-    return null;
+    return true;
   }, {
     process: {
       title: `${engine} · 执行笺`,
@@ -1039,6 +1039,7 @@ async function askAgent(raw) {
       ],
     },
   });
+  return result === true;
 }
 
 async function handleHarnessAction(actionId) {

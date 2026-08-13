@@ -21,6 +21,5 @@ export async function dispatchHarnessAction(actionId, context = {}) {
     return false;
   }
   context.onLearnerChoice?.(action.label);
-  await context.askAgent?.(action.message);
-  return true;
+  return await context.askAgent?.(action.message) === true;
 }
