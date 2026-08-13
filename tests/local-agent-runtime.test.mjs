@@ -1064,6 +1064,11 @@ test("strict request fields, idempotency conflicts, and one-run concurrency fail
     body: JSON.stringify(submitBody()),
   });
   await startedPromise;
+  const sameRequestPromise = fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: headers("concurrent-1"),
+    body: JSON.stringify(submitBody()),
+  });
   const busy = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
     method: "POST",
     headers: headers("concurrent-2"),
@@ -1072,7 +1077,12 @@ test("strict request fields, idempotency conflicts, and one-run concurrency fail
   assert.equal(busy.status, 409);
   assert.equal(busy.body.reason_code, "agent_busy");
   release();
-  assert.equal((await firstPromise).status, 200);
+  const [first, sameRequest] = await Promise.all([firstPromise, sameRequestPromise]);
+  const [firstResult, sameRequestResult] = await Promise.all([json(first), json(sameRequest)]);
+  assert.equal(firstResult.status, 200);
+  assert.equal(sameRequestResult.status, 200);
+  assert.equal(sameRequestResult.headers.get("Idempotency-Replayed"), "true");
+  assert.deepEqual(sameRequestResult.body, firstResult.body);
 
   const conflict = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
     method: "POST",

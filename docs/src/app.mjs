@@ -200,6 +200,32 @@ function agentChatAvailable() {
   );
 }
 
+const RUNTIME_SESSION_LOSS_CODES = new Set([
+  "RUNTIME_NOT_CONNECTED",
+  "RUNTIME_UNREACHABLE",
+  "authentication_required",
+]);
+
+async function resetLostRuntimeConnection() {
+  localAgentClient?.disconnect();
+  localAgentClient = null;
+  runtimeAdapters = [];
+  runtimeWorkspace = null;
+  selectedEngine = "content-only";
+  if (coachPromise) {
+    try {
+      const coach = await coachPromise;
+      coach.setAgentClient(null);
+      coach.setAgentPreference("content-only");
+    } catch {
+      // A failed Harness initialization must not prevent the connection UI
+      // from returning to the safe, retryable content-only state.
+    }
+  }
+  updateRuntimeCallout();
+  renderEngineList();
+}
+
 function updateEngineUi(message = "") {
   const display = engineDisplayName();
   const agentActive = agentChatAvailable();
@@ -533,9 +559,15 @@ async function operate(message, action) {
     const result = await action();
     if (result && typeof result === "object" && typeof result.state === "string") {
       updateFromView(result);
+      if (RUNTIME_SESSION_LOSS_CODES.has(result?.agent?.failure?.code)) {
+        await resetLostRuntimeConnection();
+      }
     }
     return result;
   } catch (error) {
+    if (RUNTIME_SESSION_LOSS_CODES.has(error?.code)) {
+      await resetLostRuntimeConnection();
+    }
     if (currentView?.state !== "error") {
       chat.appendCoach([safeMessage(error)], { error: true });
     }

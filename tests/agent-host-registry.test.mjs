@@ -53,6 +53,10 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(entryConversationSource, /chat\.setComposer\(\{[\s\S]*enabled:\s*true/u);
   assert.match(source, /currentView\?\.state \?\? "ready"/u);
   assert.match(source, /匿名 Agent 对话 · 尚未建立学习档案/u);
+  assert.match(source, /RUNTIME_SESSION_LOSS_CODES/u);
+  assert.match(source, /coach\.setAgentClient\(null\)/u);
+  assert.match(source, /coach\.setAgentPreference\("content-only"\)/u);
+  assert.match(source, /RUNTIME_SESSION_LOSS_CODES\.has\(result\?\.agent\?\.failure\?\.code\)/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /confidence:\s*"auto"/u);
   assert.match(source, /confidence_source:\s*"inferred"/u);
@@ -67,7 +71,7 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.doesNotMatch(css, /\.confidence-switch/u);
   assert.match(css, /\.timing-receipt/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v12/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v13/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {
