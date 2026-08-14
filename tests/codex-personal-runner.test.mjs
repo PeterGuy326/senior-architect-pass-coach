@@ -125,6 +125,27 @@ function jsonl(coachingText = "先复盘可用性故障模式，再做一道异�
   return jsonlValue({ coaching_text: coachingText });
 }
 
+function codex0147Jsonl(coachingText = "先复盘可用性故障模式，再做一道异题复测。") {
+  return [
+    JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        id: "item-0",
+        type: "error",
+        message: "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.",
+      },
+    }),
+    JSON.stringify({ type: "turn.started" }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "item-1", type: "agent_message", text: JSON.stringify({ coaching_text: coachingText }) },
+    }),
+    JSON.stringify({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 8 } }),
+    "",
+  ].join("\n");
+}
+
 function planJsonl(plan = {
   focus: "failure_mode_mapping",
   method: "contrast_table",
@@ -140,7 +161,7 @@ function readyProbe() {
     status: "ready",
     available: true,
     selectable: true,
-    version: "0.146.0",
+    version: "0.147.0",
     authentication: "existing_local_codex_login",
     adapter_status: "experimental_personal",
     qualified_adapter: false,
@@ -184,7 +205,7 @@ test("probe reports only an audited saved-login personal mode without claiming a
   const processRunner = async (request) => {
     calls.push(request);
     if (request.args[0] === "--version") {
-      return { exitCode: 0, signal: null, stdout: "codex-cli 0.146.0\n", stderr: "" };
+      return { exitCode: 0, signal: null, stdout: "codex-cli 0.147.0\n", stderr: "" };
     }
     if (request.args[0] === "exec") {
       return {
@@ -207,11 +228,11 @@ test("probe reports only an audited saved-login personal mode without claiming a
 
   assert.equal(result.status, "ready");
   assert.equal(result.available, true);
-  assert.equal(result.version, "0.146.0");
+  assert.equal(result.version, "0.147.0");
   assert.equal(result.qualified_adapter, false);
   assert.equal(result.adapter_status, "experimental_personal");
   assert.ok(result.reason_codes.includes("digital_employee_adapter_unqualified"));
-  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0"]);
+  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0", "0.147.0"]);
   assert.deepEqual(calls.map((call) => call.args), [["--version"], ["exec", "--help"], ["debug", "models"], ["login", "status"]]);
   assert.deepEqual(result.model_preferences.map(({ id }) => id), ["lite", "fast", "balanced", "deep"]);
   assert.equal(result.default_model_preference, "fast");
@@ -254,7 +275,7 @@ test("probe rejects unaudited versions, unsafe auth, and missing command flags",
   const unaudited = await probeCodexPersonalMode({
     userCodexHome: root,
     authFile,
-    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.147.0", stderr: "" }),
+    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.148.0", stderr: "" }),
   });
   assert.equal(unaudited.status, "incompatible");
   assert.ok(unaudited.reason_codes.includes("codex_version_not_audited"));
@@ -514,6 +535,57 @@ test("successful exit with stderr is rejected and never returned to the caller",
       error.code === "CODEX_PERSONAL_UNEXPECTED_STDERR"
       && !error.message.includes("sensitive diagnostic")
     ),
+  );
+});
+
+test("audited Codex 0.147 diagnostics are accepted only in their exact fail-closed shape", async (t) => {
+  const { authFile } = await authFixture(t);
+  const runner = new CodexPersonalRunner({
+    authFile,
+    modelPreference: "lite",
+    processRunner: async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: codex0147Jsonl(),
+      stderr: "2026-08-14T17:24:52.587810Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit\n",
+    }),
+    probe: async () => readyProbe(),
+    personalAuthConsent: true,
+  });
+
+  const output = await runner.run(reviewInput());
+  assert.equal(output.teaching_result.summary, "先复盘可用性故障模式，再做一道异题复测。");
+
+  assert.throws(
+    () => parseCodexJsonl(codex0147Jsonl().replace("Code Mode is unavailable", "Code Mode failed"), {
+      version: "0.147.0",
+    }),
+    CoachErrorLike,
+  );
+  assert.throws(
+    () => parseCodexJsonl(codex0147Jsonl(), { version: "0.146.0" }),
+    CoachErrorLike,
+  );
+});
+
+test("Codex 0.147 stderr allowlist rejects near-matches and additional diagnostics", async (t) => {
+  const { authFile } = await authFixture(t);
+  const runner = (stderr) => new CodexPersonalRunner({
+    authFile,
+    modelPreference: "lite",
+    processRunner: async () => ({ exitCode: 0, signal: null, stdout: jsonl(), stderr }),
+    probe: async () => readyProbe(),
+    personalAuthConsent: true,
+  });
+  const diagnostic = "2026-08-14T17:24:52.587810Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit";
+
+  await assert.rejects(
+    runner(`${diagnostic}\nsecond diagnostic`).run(reviewInput()),
+    (error) => error.code === "CODEX_PERSONAL_UNEXPECTED_STDERR",
+  );
+  await assert.rejects(
+    runner(diagnostic.replace("timeout", "connection reset")).run(reviewInput()),
+    (error) => error.code === "CODEX_PERSONAL_UNEXPECTED_STDERR",
   );
 });
 
