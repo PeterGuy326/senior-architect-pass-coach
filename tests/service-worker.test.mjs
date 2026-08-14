@@ -3,20 +3,31 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-async function loadServiceWorker({ fetchImpl, cachePut = async () => {}, cacheMatch = async () => null } = {}) {
+async function loadServiceWorker({
+  fetchImpl,
+  cacheAddAll = async () => {},
+  cachePut = async () => {},
+  cacheMatch = async () => null,
+  cacheNames = [],
+  onCacheDelete = () => {},
+  onCacheOpen = () => {},
+} = {}) {
   const listeners = new Map();
   const source = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  const cache = { addAll: async () => {}, put: cachePut };
+  const cache = { addAll: cacheAddAll, put: cachePut };
   const context = vm.createContext({
     URL,
     Request,
     Response,
     fetch: fetchImpl,
     caches: {
-      open: async () => cache,
+      open: async (name) => {
+        onCacheOpen(name);
+        return cache;
+      },
       match: cacheMatch,
-      keys: async () => [],
-      delete: async () => true,
+      keys: async () => [...cacheNames],
+      delete: async (name) => { onCacheDelete(name); return true; },
     },
     self: {
       location: { origin: "https://peterguy326.github.io" },
@@ -28,6 +39,44 @@ async function loadServiceWorker({ fetchImpl, cachePut = async () => {}, cacheMa
   vm.runInContext(source, context, { filename: "docs/sw.js" });
   return listeners;
 }
+
+test("Service Worker v17 precaches the mandatory Local Agent gate module", async () => {
+  const opened = [];
+  let coreAssets = [];
+  const listeners = await loadServiceWorker({
+    onCacheOpen: (name) => opened.push(name),
+    cacheAddAll: async (assets) => { coreAssets = [...assets]; },
+  });
+  const lifetime = [];
+  listeners.get("install")({
+    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
+  });
+  await Promise.all(lifetime);
+
+  assert.deepEqual(opened, ["architect-pass-coach-pages-v17"]);
+  assert.equal(coreAssets.filter((asset) => asset === "./src/local-agent-gate.mjs").length, 1);
+  assert.ok(coreAssets.includes("./src/app.mjs"));
+  assert.ok(coreAssets.includes("./index.html"));
+});
+
+test("Service Worker activation deletes only older caches owned by this Page", async () => {
+  const deleted = [];
+  const listeners = await loadServiceWorker({
+    cacheNames: [
+      "architect-pass-coach-pages-v17",
+      "architect-pass-coach-pages-v16",
+      "other-github-pages-project-v9",
+    ],
+    onCacheDelete: (name) => deleted.push(name),
+  });
+  const lifetime = [];
+  listeners.get("activate")({
+    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
+  });
+  await Promise.all(lifetime);
+
+  assert.deepEqual(deleted, ["architect-pass-coach-pages-v16"]);
+});
 
 function dispatchFetch(listener, request) {
   let responsePromise = null;

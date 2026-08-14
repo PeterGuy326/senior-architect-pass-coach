@@ -244,9 +244,16 @@ export function createChatView({
   function appendMessage(role, { paragraphs = [], question, timing, annotation, action, suggestions = [] } = {}) {
     const item = node("li", `message message--${role}`);
     const byline = node("div", "message__byline");
-    const chop = node("span", "teacher-chop", role === "learner" ? "我" : role === "system" ? "记" : "师");
+    const provenance = role === "learner"
+      ? { mark: "我", label: "我的回答" }
+      : role === "coach"
+        ? { mark: "师", label: "本机 Agent" }
+        : role === "system"
+          ? { mark: "记", label: "学习记录" }
+          : { mark: "验", label: "本地 Harness" };
+    const chop = node("span", "teacher-chop", provenance.mark);
     chop.setAttribute("aria-hidden", "true");
-    byline.append(chop, node("span", "", role === "learner" ? "我的回答" : role === "system" ? "学习记录" : "过线私教"));
+    byline.append(chop, node("span", "", provenance.label));
 
     const paper = node("div", "message__paper");
     for (const paragraph of paragraphs) {
@@ -336,7 +343,11 @@ export function createChatView({
   }
 
   function appendCoach(paragraphs, options = {}) {
-    return appendMessage(options.error ? "error" : "coach", { ...options, paragraphs });
+    return appendMessage("coach", { ...options, paragraphs });
+  }
+
+  function appendHarness(paragraphs, options = {}) {
+    return appendMessage(options.error ? "error" : "harness", { ...options, paragraphs });
   }
 
   function appendLearner(text) {
@@ -608,7 +619,7 @@ export function createChatView({
       appendSystem(asText(view.message, "正在从固定公开版本中挑选本轮最有价值的一题……"));
       setComposer({ enabled: true, busy: true });
     } else if (state === "awaiting_answer" && view.question) {
-      appendMessage("coach", {
+      appendMessage("harness", {
         paragraphs: [asText(view.message, "先看题，直接选答案。私教会根据作答过程自动判断证据强度。")],
         question: view.question,
       });
@@ -624,13 +635,13 @@ export function createChatView({
       if (copy.behavior) paragraphs.push(copy.behavior);
       if (copy.reference) paragraphs.push(`参考答案：${copy.reference}`);
       if (copy.explanation) paragraphs.push(copy.explanation);
-      appendCoach(paragraphs, {
+      appendHarness(paragraphs, {
         timing: copy.timing,
         annotation: "自动判断以相对做题时间为主；固定答案决定对错，真实改选只会让证据更保守。",
       });
       const proactive = (view?.agent?.proactive_suggestions || [])[0];
       if (asText(proactive?.prompt)) {
-        appendCoach([
+        appendHarness([
           `主动追问：${asText(proactive.prompt).slice(0, 160)}`,
           "不想手输时，直接选择你现在更接近的状态；它只用于继续讲解，不会被当作掌握证据。",
         ], {
@@ -643,19 +654,19 @@ export function createChatView({
       setComposer({ enabled: true });
     } else if (state === "complete") {
       optionPanel.hidden = true;
-      appendCoach([
+      appendHarness([
         asText(view.message, "今天这一轮已经收束。进度已留在当前浏览器，下次会从真实证据继续。"),
         "可以输入“查看进度”，或输入“出题”再开一轮。",
       ], { annotation: "到这里就停也可以。过线靠稳定重复，不靠一次刷满。" });
       setComposer({ enabled: true });
     } else if (state === "indeterminate" || state === "error") {
       optionPanel.hidden = true;
-      appendCoach([
+      appendHarness([
         asText(view.error?.message ?? view.error ?? view.message, "当前会话需要人工核对，系统没有冒险重复提交。"),
       ], { error: true });
       setComposer({ enabled: true });
     } else if (state === "ready") {
-      appendCoach([
+      appendHarness([
         asText(view.message, view.knowsProgress ? "已读取这个浏览器里的真实学习档案。" : "私人档案已建好，目前还没有作答证据。"),
       ]);
       setComposer({ enabled: true });
@@ -712,6 +723,7 @@ export function createChatView({
 
   return Object.freeze({
     appendCoach,
+    appendHarness,
     appendLearner,
     appendSystem,
     startProcess,

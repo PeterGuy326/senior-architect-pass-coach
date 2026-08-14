@@ -4,7 +4,7 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 
 ## 考生使用
 
-1. 从 [GitHub Releases](https://github.com/PeterGuy326/senior-architect-pass-coach/releases) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
+1. 从 [v0.7.0-preview.2 Release](https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.2) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 解压并打开 `Senior Architect Pass Coach.app`；Linux x64（glibc 2.28+，不适用于 Alpine/musl）解压并运行 `start-local-coach`。
 3. macOS 首次解压后打开一次 `.app`，让系统登记 `senior-architect-pass-coach://` 启动入口。它是固定、无参数的 launch-only 信号；应用启动器忽略系统传入的全部参数，网页不会在这里放令牌、配对 state、命令、URL 或文件路径。Runtime 仍只监听 `http://127.0.0.1:43127`。
 4. 在 Pages 的私教大脑面板里直接点击目标 Agent 卡片。网页会在这次点击内探测固定健康端点：已经运行就直接配对；macOS 没有运行时才用上面的固定入口唤起应用并短暂等待，Linux 必须先手工运行 `start-local-coach`。只有健康响应同时匹配协议、状态和实例标识后，等待窗口才会进入 Runtime 自己的确认页。点击“允许并返回私教页面”，再按浏览器提示允许访问本地网络；目标 Agent 通过检查后会自动进入对话。
@@ -14,12 +14,12 @@ Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行�
 
 不需要 clone 仓库、安装 npm 包或编译源码。当前 macOS 包是未 notarize 的开源预览版；ad-hoc 签名只用于完整性检查，不代表 Developer ID 或 Apple 背书。首次启动可先在 Finder 中右键应用并选择“打开”；若仍被拦，请先尝试启动一次，再到“系统设置 → 隐私与安全 → 仍要打开”，详见 [Apple 官方说明](https://support.apple.com/102445)。
 
-## 浏览器支持与降级
+## 浏览器支持与门禁
 
-当前配对主路径是桌面 Chrome/Edge。公开 HTTPS 页面访问本机 loopback 时，浏览器可能显示本地网络访问许可；只有用户点击连接才会请求固定确认页，只有确认后才会调用受保护 API。拒绝许可不会影响基础私教。Chrome 的权限模型说明见 [Local Network Access](https://developer.chrome.com/blog/local-network-access)。
+当前配对主路径是桌面 Chrome/Edge。公开 HTTPS 页面访问本机 loopback 时，浏览器可能显示本地网络访问许可；只有用户点击连接才会请求固定确认页，只有确认后才会调用受保护 API。拒绝许可后 Page 保持在 Agent 连接门，不会恢复或创建档案、出题、判分、更新进度或提供浏览器聊天。Chrome 的权限模型说明见 [Local Network Access](https://developer.chrome.com/blog/local-network-access)。
 
-- Safari、Firefox 或受管浏览器如果拦截 HTTPS → HTTP loopback，页面会保留 `content-only`，不会丢失或改写进度；需要 Agent 时请改用支持该路径的桌面浏览器。
-- 手机或平板中的 `127.0.0.1` 是移动设备自身，不是运行 Runtime 的电脑；移动端只能使用基础私教。
+- Safari、Firefox 或受管浏览器如果拦截 HTTPS → HTTP loopback，页面会保持锁定，不会丢失或改写已有进度；请改用支持该路径的桌面浏览器。
+- 手机或平板中的 `127.0.0.1` 是移动设备自身，不是运行 Runtime 的电脑；当前移动端无法进入私教流程。
 - Runtime 不会为了兼容移动端而监听 LAN 地址，也不支持把端口暴露给局域网或公网。
 
 ## 配对协议与记忆
@@ -30,7 +30,7 @@ Pages 加载时不会探测本机端口。用户点击连接后，页面同步�
 
 明文 Bearer 在浏览器侧只短暂经过确认页的 JavaScript 对象，之后只留在 Pages 的 JavaScript 私有字段；Runtime 只保留其摘要与绑定 Origin。它不进入 URL、DOM、IndexedDB、`localStorage`、`sessionStorage`、导出文件或日志；刷新 Pages 或重启 Runtime 后需要重新配对。后续跨 Origin API 只允许精确的 `https://peterguy326.github.io`，不使用 wildcard CORS 或 cookie credentials。
 
-配对窗口不读取、不复制也不保存学习档案。切换 Agent 只改变讲解引擎，不会清空当前题目、session revision、attempt 或进度；这些数据始终留在 Pages Origin 的 IndexedDB，因此正常使用不需要在 Pages 与 Runtime 之间导出、导入或合并档案。导出仍只用于用户主动备份或换浏览器。
+配对窗口不读取、不复制也不保存学习档案。切换 Agent 只改变讲解引擎，不会清空当前题目、session revision、attempt 或进度；这些数据始终留在 Pages Origin 的 IndexedDB，因此正常使用不需要在 Pages 与 Runtime 之间导出、导入或合并档案。断开 Runtime 会锁定 Page 并暂停当前交互，但不会回滚或删除已提交数据；重新连接并选择可用 Agent 后再恢复档案。导出仍只用于用户主动备份或换浏览器。
 
 Runtime 的工作区绑定格式为 `coach-local-workspace.v1`。它不把本机目录暴露给 Page，只返回固定员工身份、版本和 `sha256:` 摘要。旧 Runtime、错误员工、摘要格式不匹配或带路径的绑定都会被新版 Page 拒绝；重启 Runtime 会重新密封并重新配对。
 
@@ -58,6 +58,7 @@ Codex 个人实验模式不会复制或记录 `auth.json` 内容。每轮只在 
 ## 信任边界
 
 - Runtime 只绑定 IPv4 loopback `127.0.0.1`，拒绝 `localhost`、LAN Host、代理头和非白名单 Origin。
+- Page 必须同时拥有有效配对和实际可选的 Agent 才开放档案、题目、判分、进度与聊天；没有 `content-only` 产品后备模式。
 - bootstrap 只允许 Runtime 自己的确认页调用；Pages 不能直接为自己签发授权。
 - API 请求不能选择可执行文件、目录、环境变量、身份或模型密钥。
 - Codex 的个人模式同意只保存在当前 Bearer 对应的 Runtime 内存中；新配对、刷新或重启不会继承。

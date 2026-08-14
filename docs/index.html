@@ -12,16 +12,16 @@
     >
     <meta
       name="description"
-      content="系统架构设计师过线私教：无需安装，在浏览器里完成诊断、刷题和弱项复习。"
+      content="系统架构设计师过线私教：连接本机 Agent 后，在浏览器里完成诊断、刷题和弱项复习。"
     >
-    <title>架构过线私塾 · 浏览器私人老师</title>
+    <title>架构过线私塾 · 本机 Agent 私教</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%2317213f%22/%3E%3Crect%20x=%228%22%20y=%228%22%20width=%2248%22%20height=%2248%22%20fill=%22%23a33b2e%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2232%22%20fill=%22%23fffdf7%22%3E%E6%9E%B6%3C/text%3E%3C/svg%3E">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="stylesheet" href="./assets/app.css">
     <script type="module" src="./src/app.mjs"></script>
   </head>
   <body>
-    <a class="skip-link" href="#answer-input">跳到答题区</a>
+    <a class="skip-link" href="#study-desk">跳到私教主区</a>
 
     <header class="masthead">
       <div class="masthead__inner">
@@ -34,7 +34,7 @@
         </a>
         <p class="masthead__motto">夜读一卷，批注一题，稳稳过线。</p>
         <nav class="masthead__nav" aria-label="页面导航">
-          <a href="#study-desk">开始复习</a>
+          <a href="#study-desk">连接 Agent</a>
           <a href="./privacy.html">隐私说明</a>
           <a
             href="https://github.com/PeterGuy326/senior-architect-pass-coach"
@@ -55,7 +55,7 @@
           <ol class="task-list" id="task-list">
             <li data-task-state="current">
               <span class="task-index">壹</span>
-              <span class="task-copy">建档后生成第一道诊断题</span>
+              <span class="task-copy">连接本机 Agent 后开始诊断</span>
             </li>
             <li>
               <span class="task-index">贰</span>
@@ -101,49 +101,55 @@
         <header class="coach-desk__header">
           <div>
             <p class="folio folio--light">本日夜读 · 综合客观题</p>
-            <h1 id="coach-title">你的过线私教</h1>
+            <h1 id="coach-title">你的本机 Agent 私教</h1>
           </div>
           <div class="session-mark" aria-label="会话状态">
             <span class="session-mark__dot" id="session-dot" aria-hidden="true"></span>
-            <span id="session-label">等待建档</span>
+            <span id="session-label">等待本机 Agent</span>
           </div>
         </header>
 
         <div class="truth-strip" aria-label="运行方式说明">
-          <span>仅存此浏览器</span>
+          <span>学习证据仅存此浏览器</span>
           <span>固定公开题库版本</span>
-          <button class="engine-trigger" id="engine-trigger" type="button" aria-haspopup="dialog">
-            <span id="engine-trigger-label">基础私教 · 连接本机 Agent</span>
+          <button class="engine-trigger" id="engine-trigger" type="button" aria-haspopup="dialog" aria-controls="engine-dialog" aria-expanded="false">
+            <span id="engine-trigger-label">尚未接入 · 连接本机 Agent</span>
             <span aria-hidden="true">⌄</span>
           </button>
         </div>
 
         <section class="chat-sheet" aria-label="私教对话">
+          <section class="agent-gate" id="agent-gate" aria-labelledby="agent-gate-title" tabindex="-1">
+            <div class="agent-gate__seal" aria-hidden="true">接</div>
+            <div class="agent-gate__copy">
+              <p class="folio">LOCAL AGENT REQUIRED</p>
+              <h2 id="agent-gate-title">先接入本机 Agent，再开始私教</h2>
+              <p id="agent-gate-detail">这里不提供浏览器伪聊天机器人，也不会在连接失败时退回规则话术。安装一次 Runtime，然后由你明确选择本机 Agent。</p>
+              <ol class="agent-gate__steps" aria-label="接入步骤">
+                <li><span>壹</span>安装或启动本机 Runtime</li>
+                <li><span>贰</span>确认当前网页的本机授权</li>
+                <li><span>叁</span>选择通过员工契约检查的 Agent</li>
+              </ol>
+              <div class="agent-gate__actions">
+                <button class="primary-action" id="agent-gate-connect" type="button" aria-haspopup="dialog" aria-controls="engine-dialog" aria-expanded="false">连接并选择本机 Agent <span aria-hidden="true">→</span></button>
+                <a class="source-link" href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.2" rel="noreferrer">打开 / 安装 Runtime <span aria-hidden="true">↗</span></a>
+              </div>
+              <p class="agent-gate__status" id="agent-gate-status" role="status">未连接时，对话、建档、出题和复习均保持锁定。桌面 Chrome / Edge 是当前配对主路径；手机和平板无法连接电脑上的 Runtime。</p>
+            </div>
+          </section>
           <ol
             class="chat-timeline"
             id="chat-timeline"
             aria-live="polite"
             aria-relevant="additions text"
+            aria-hidden="true"
+            hidden
           >
-            <li class="message message--coach">
-              <div class="message__byline">
-                <span class="teacher-chop" aria-hidden="true">师</span>
-                <span>过线私教</span>
-              </div>
-              <div class="message__paper">
-                <p>我现在还不知道你的学习进度，也不会猜。</p>
-                <p>先在这个浏览器里建一份私人档案，我会立即用综合客观题做一次短诊断，再把时间压到最值得补的地方。</p>
-                <button class="primary-action" id="create-profile" type="button">
-                  在本浏览器建档并开始诊断
-                  <span aria-hidden="true">→</span>
-                </button>
-              </div>
-            </li>
           </ol>
 
           <div class="option-panel" id="option-panel" hidden aria-label="题目选项"></div>
 
-          <form class="answer-composer" id="answer-form" aria-label="提交答案">
+          <form class="answer-composer" id="answer-form" aria-label="提交答案" hidden>
             <div class="answer-row">
               <label class="sr-only" for="answer-input">输入 A 到 H 中的选项，或向已连接的 Agent 提问</label>
               <textarea
@@ -167,12 +173,12 @@
         </section>
 
         <nav class="desk-tools" aria-label="学习工具">
-          <button type="button" data-command="progress">查看进度</button>
-          <button type="button" data-command="tasks">今日任务</button>
-          <button type="button" data-command="continue">继续下一题</button>
+          <button type="button" data-command="progress" data-requires-agent disabled>查看进度</button>
+          <button type="button" data-command="tasks" data-requires-agent disabled>今日任务</button>
+          <button type="button" data-command="continue" data-requires-agent disabled>继续下一题</button>
           <span class="desk-tools__divider" aria-hidden="true"></span>
-          <button type="button" data-command="export">导出档案</button>
-          <button type="button" data-command="import">导入档案</button>
+          <button type="button" data-command="export" data-requires-agent disabled>导出档案</button>
+          <button type="button" data-command="import" data-requires-agent data-allows-profile-repair disabled>导入档案</button>
           <button class="danger-action" type="button" data-command="clear">清除本机数据</button>
           <input
             class="sr-only"
@@ -180,6 +186,7 @@
             type="file"
             accept="application/json,.json"
             aria-label="选择要导入的私人档案 JSON 文件"
+            disabled
           >
         </nav>
         <p class="app-status" id="app-status" role="status" aria-live="polite"></p>
@@ -202,8 +209,8 @@
           <p class="margin-note__title">本版边界</p>
           <ul id="runtime-boundary-list">
             <li>只练综合知识客观题</li>
-            <li>基础私教无需模型或 API Key</li>
-            <li>Agent 只做提交后讲解与对话</li>
+            <li>未接入本机 Agent 时不提供聊天或出题</li>
+            <li>Agent 负责开放式对话与个性化讲解</li>
             <li>判分与进度始终由本地 Harness 掌管</li>
           </ul>
           <a href="./privacy.html">数据与隐私说明</a>
@@ -232,13 +239,7 @@
         >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
         <button class="secondary-action" id="runtime-connect" type="button">检测全部本机 Agent</button>
       </div>
-      <div class="engine-list" id="engine-list" aria-label="讲解引擎状态与选择">
-        <button class="engine-card" type="button" data-engine="content-only" data-engine-state="ready" aria-pressed="true">
-          <span class="engine-card__title">基础私教</span>
-          <span class="engine-card__state">始终可用</span>
-          <span class="engine-card__detail">固定题库、固定答案键、浏览器私人进度；不调用模型。</span>
-        </button>
-      </div>
+      <div class="engine-list" id="engine-list" aria-label="讲解引擎状态与选择"></div>
       <section class="model-profile-panel" id="model-profile-panel" aria-labelledby="model-profile-title" hidden>
         <div class="model-profile-panel__heading">
           <div>
@@ -249,7 +250,7 @@
         </div>
         <div class="model-profile-list" id="model-profile-list" role="radiogroup" aria-label="Codex 模型档位"></div>
       </section>
-      <p class="engine-dialog__foot" id="engine-dialog-status" role="status">当前：基础私教</p>
+      <p class="engine-dialog__foot" id="engine-dialog-status" role="status">当前尚未选择本机 Agent。</p>
     </dialog>
 
     <footer class="site-footer">

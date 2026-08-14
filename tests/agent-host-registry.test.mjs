@@ -34,7 +34,8 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.equal((catalogSource.match(/state:\s*"package_incompatible"/gu) || []).length, 1);
   assert.equal((catalogSource.match(/state:\s*"probe_only"/gu) || []).length, 2);
   assert.doesNotMatch(catalogSource, /state:\s*"ready"|等待连接本机|本机已安装/u);
-  assert.match(source, /基础私教 · Runtime 已连接/u);
+  assert.match(source, /Runtime 已连接 · 选择 Agent/u);
+  assert.match(source, /本机 Agent 必选/u);
   assert.match(source, /已构建并锁定 Digital Employee 工作区/u);
   assert.match(source, /切换 Agent 只替换“大脑”/u);
   assert.match(source, /Codex CLI 个人实验模式/u);
@@ -58,7 +59,7 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /匿名 Agent 对话 · 尚未建立学习档案/u);
   assert.match(source, /RUNTIME_SESSION_LOSS_CODES/u);
   assert.match(source, /coach\.setAgentClient\(null\)/u);
-  assert.match(source, /coach\.setAgentPreference\("content-only"\)/u);
+  assert.match(source, /if \(engine === "content-only"\) return false/u);
   assert.match(source, /RUNTIME_SESSION_LOSS_CODES\.has\(result\?\.agent\?\.failure\?\.code\)/u);
   assert.match(source, /syncInput:\s*false/u);
   assert.match(source, /confidence:\s*"auto"/u);
@@ -85,6 +86,9 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /event\.key !== "Enter" \|\| event\.shiftKey \|\| event\.isComposing/u);
   assert.match(source, /elements\.answerForm\.requestSubmit\(\)/u);
   const html = await readFile(new URL("../docs/index.html", import.meta.url), "utf8");
+  assert.match(html, /先接入本机 Agent，再开始私教/u);
+  assert.match(html, /未连接时，对话、建档、出题和复习均保持锁定/u);
+  assert.doesNotMatch(html, /data-engine="content-only"/u);
   assert.doesNotMatch(html, /name="confidence"|id="confidence-field"|<legend>自报把握度<\/legend>/u);
   assert.match(html, /按题目长短计算参考用时.*实际前台有效用时/u);
   assert.match(html, /直接点击想用的 Agent/u);
@@ -103,10 +107,11 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v16/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v17/u);
   assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/harness-action-router\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/dialog-interaction\.mjs/u);
+  assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

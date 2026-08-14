@@ -78,6 +78,30 @@ test("return-to-answer is a local no-op on learner data and never calls Agent", 
   assert.deepEqual(draft, before);
 });
 
+test("every Harness action kind fails closed when no Local Agent is available", async (t) => {
+  for (const [name, actionId, state] of [
+    ["command", "local-progress", "ready"],
+    ["local", "local-return-to-answer", "awaiting_answer"],
+    ["agent", "coach-next-step", "ready"],
+  ]) {
+    await t.test(name, async () => {
+      const events = [];
+      const handled = await dispatchHarnessAction(actionId, {
+        state,
+        agentAvailable: false,
+        onDisconnected: () => events.push("disconnected"),
+        onLearnerChoice: () => events.push("learner"),
+        runCommand: () => events.push("command"),
+        focusAnswer: () => events.push("focus"),
+        askAgent: () => events.push("agent"),
+        onBlocked: () => events.push("blocked"),
+      });
+      assert.equal(handled, false);
+      assert.deepEqual(events, ["disconnected"]);
+    });
+  }
+});
+
 test("Agent quick actions send once only when the objective permits it", async () => {
   const sent = [];
   assert.equal(await dispatchHarnessAction("coach-next-step", {
