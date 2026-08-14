@@ -1,16 +1,16 @@
 # 架构与信任边界
 
-产品只有一个考生主入口：GitHub Pages 上无需安装的静态 Web Chatbot。用户可选启动 Local Agent Runtime，让同一个 Pages 页面获得本机 Agent 讲解；Runtime 是 loopback 配对与执行桥，不是第二个学习站点。面向开发者和未来连接器的本地 Node CLI Conversation Harness 是另一种集成接口。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
+产品只有一个考生主入口：GitHub Pages 上的静态私教界面。Page 不是独立 Chatbot；只有连接 Local Agent Runtime 并选择一个实际可用的本机 Agent 后，才会恢复或创建档案并开放出题、判分、进度与对话。Runtime 是 loopback 配对与执行桥，不是第二个学习站点。面向开发者和未来连接器的本地 Node CLI Conversation Harness 是另一种集成接口。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
 
 ## 组件
 
 ### `docs/`
 
-可直接由 GitHub Pages 托管的零构建静态应用。浏览器端 `content-only` Harness 负责聊天状态、每日任务和确定性进度；Dedicated Worker 从白名单中的固定题库 commit 读取题目，作答前只向主线程返回题干与选项，提交后才返回参考答案与解析。
+可直接由 GitHub Pages 托管的零构建静态应用。浏览器 Harness 负责 Agent 门、每日任务和确定性进度；Dedicated Worker 从白名单中的固定题库 commit 读取题目，作答前只向主线程返回题干与选项，提交后才返回参考答案与解析。浏览器 Harness 不是生成式 Agent，也不提供 `content-only` 产品后备聊天。
 
-个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。作答行为模块用单调时钟累计前台有效用时、首次选择和有界改选次数；先按题干/选项阅读负荷和逻辑复杂度给出 12–90 秒总体参考，以“前台有效总用时 ÷ 当前参考用时”为主档位：低于 0.55 为偏快，0.55–1.60 为正常，1.60–2.40 为偏慢，超过 2.40 为明显超时。至少积累 12 条干净样本后才用个人 pace 聚合做 0.8–1.25 倍校正，个人参考下限为 8 秒。持久化 pace 始终相对不变的题目负荷分桶，避免个人校准反向污染自己的基线。多选构造不算改选，失焦/隐藏/刷新后的残缺计时不作熟练判断；过早完成首次选择不能通过故意等待提交来洗成正常证据。Web 不要求考生自报把握度：只有答对、连续前台计时完整、总用时处于正常区间、首次选择不过早且没有真实改选，才形成稳定正确证据；过快、过慢、计时不完整或改选都会安排复测，所有答错都会进入稳定准确率分母。行为信号不改写固定答案键的客观对错，只决定正确作答能否成为稳定掌握证据。刷新时只读恢复档案和派生进度，不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
+个人档案、派生进度、无题文作答证据和最小会话状态以一个 IndexedDB 事务原子提交。作答行为模块用单调时钟累计前台有效用时、首次选择和有界改选次数；先按题干/选项阅读负荷和逻辑复杂度给出 12–90 秒总体参考，以“前台有效总用时 ÷ 当前参考用时”为主档位：低于 0.55 为偏快，0.55–1.60 为正常，1.60–2.40 为偏慢，超过 2.40 为明显超时。至少积累 12 条干净样本后才用个人 pace 聚合做 0.8–1.25 倍校正，个人参考下限为 8 秒。持久化 pace 始终相对不变的题目负荷分桶，避免个人校准反向污染自己的基线。多选构造不算改选，失焦/隐藏/刷新后的残缺计时不作熟练判断；过早完成首次选择不能通过故意等待提交来洗成正常证据。Web 不要求考生自报把握度：只有答对、连续前台计时完整、总用时处于正常区间、首次选择不过早且没有真实改选，才形成稳定正确证据；过快、过慢、计时不完整或改选都会安排复测，所有答错都会进入稳定准确率分母。行为信号不改写固定答案键的客观对错，只决定正确作答能否成为稳定掌握证据。Page 只会在 Agent 门进入 ready 后读取并恢复档案；它不持久化 active question、原始 response、题干、选项、答案或解析。案例与论文在 Web MVP 中保持未测量。
 
-直接打开 GitHub Pages 时默认不运行 Agent Host，也不要求 API Key。浏览器不会自动探测 localhost；只有用户点击“连接本机 Agent”后，才会先探测固定健康端点。若 macOS Runtime 未运行，Page 使用不含参数或秘密的固定 custom scheme 唤起已安装应用；只有 v4 health 与工作区就绪后才进入 loopback 确认页。Runtime 不存在、浏览器不支持、用户拒绝许可、连接断开或模型失败时，基础私教仍可完整出题、判分和保存进度。
+直接打开 GitHub Pages 时，所有学习与对话入口都保持锁定。浏览器不会自动探测 localhost；只有用户点击“连接本机 Agent”后，才会先探测固定健康端点。若 macOS Runtime 未运行，Page 使用不含参数或秘密的固定 custom scheme 唤起已安装应用；只有 v4 health、工作区就绪且一个 Adapter 实际可选后才解除门禁。Runtime 不存在、浏览器不支持、用户拒绝许可或连接断开时，Page 维持或恢复锁定，不读取档案、不出题、不判分、不更新进度，也不降级为浏览器伪聊天。断连前已经原子提交的 IndexedDB 数据保留不变。
 
 ### Local Agent Runtime
 
@@ -26,7 +26,7 @@ Runtime 在监听端口之前创建一份 Digital Employee 密封快照，并生
 4. Pages 校验消息来源、窗口引用、state、协议版本、token 格式和 Runtime instance，再把 Bearer 放入 JavaScript 私有字段；
 5. 后续 `/v1/adapters`、preflight 和 `/v1/coach` 只接受精确 Pages Origin、匹配协议头和该 Origin 的 Bearer。CORS 不使用 `*` 或 cookie credentials。
 
-该流程避免页面加载即扫描本机服务，也不把授权写进 URL、DOM、浏览器存储、导出或日志。Runtime 重启或 Pages 刷新后必须重新配对。桌面 Chrome/Edge 是当前主路径；Safari、Firefox、受管浏览器和移动端不满足 loopback 访问条件时降级到 `content-only`，Runtime 不监听 LAN 地址绕过浏览器边界。
+该流程避免页面加载即扫描本机服务，也不把授权写进 URL、DOM、浏览器存储、导出或日志。Runtime 重启或 Pages 刷新后必须重新配对。桌面 Chrome/Edge 是当前主路径；Safari、Firefox、受管浏览器和移动端不满足 loopback 访问条件时无法进入私教流程，Runtime 不监听 LAN 地址绕过浏览器边界。
 
 Adapter preflight 会分别展示缺少凭证、安装状态和真正可选状态，不能把“安装了 CLI”冒充成“可以运行”。Claude Code、Qwen Code 和 CodeBuddy 只有在员工包级检查通过时才可选；Qoder 因缺少 `structured_output` 不可选；Codex 在 Digital Employee `0.3.0` 中仍是 probe-only；Hermes Agent 指 Nous Research 的 Hermes Agent，当前也仅以 `hermes --version` 探测，执行 Adapter 尚未实现。
 
@@ -45,7 +45,7 @@ Agent 增强采用 Hybrid Harness，而不是建立第二份学习档案：
 5. Runtime 通常通过 Digital Employee 的 one-shot Host 执行员工包；Codex 个人实验模式会在 Runtime 内再次缩减为科目、考点、掌握结果和去身份化进度，只接收枚举化 plan，再由受信本地模板组装同一输出契约；两条路径都完整验证后只返回有界 summary；
 6. 模型失败只会缺少本轮生成式讲解，不会回滚、重复或改写已经提交的进度。
 
-Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Pages Harness。切换 Claude、Qwen、CodeBuddy 或退回 `content-only` 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。自然语言追问同样只读取有界上下文，不具有进度写权限。
+Adapter 是可替换的“讲解引擎”，员工身份和记忆仍属于 Pages Harness。切换 Claude、Qwen 或 CodeBuddy 只改变下一轮 execution preference，不改变当前题目、session revision、attempt 或进度。断开当前 Adapter 会重新锁定 Page，但不会回滚已提交数据。自然语言追问同样只读取有界上下文，不具有进度写权限。底层 CLI 的 `content-only` 仍可供开发者与连接器测试 Harness，但不是 Pages 产品模式。
 
 GitHub Pages 与 `127.0.0.1` 是不同 Origin，但 loopback 页面只负责授权，不拥有学习 IndexedDB。所有 Agent 在同一个 Pages 页面复用同一档案，正常使用不存在 Pages → Runtime 档案迁移。导出、导入仍可用于用户主动备份或换浏览器，不用于 Agent 配对。
 
@@ -127,7 +127,7 @@ Harness 与 Workbench 在调用员工包前生成两份对象：
 - 钉钉、飞书的正式 Adapter；
 - 托管 Agent Host 和线上模型凭证管理；
 - 无安装的浏览器内模型执行；Local Agent 必须运行用户明确启动的本机 Runtime；
-- Safari、Firefox 或移动端到电脑 Runtime 的兼容桥；不支持时保留 `content-only`；
+- Safari、Firefox 或移动端到电脑 Runtime 的兼容桥；不支持时 Page 保持锁定；
 - 已签名、notarized 与自动更新的正式桌面安装器（当前 Release 是无需编译的预览包）；
 - 案例与论文的可信 Rubric 收据闭环（首期只写入客观题证据）；
 - Digital Employee 合格 Codex Adapter（当前框架仅 probe-only；案例级个人实验 Runner 不等同于该能力）；

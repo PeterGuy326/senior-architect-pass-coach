@@ -1,4 +1,5 @@
-const CACHE_NAME = "architect-pass-coach-pages-v16";
+const CACHE_NAME = "architect-pass-coach-pages-v17";
+const CACHE_PREFIX = "architect-pass-coach-pages-";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
@@ -10,6 +11,7 @@ const CORE_ASSETS = Object.freeze([
   "./src/harness-actions.mjs",
   "./src/harness-action-router.mjs",
   "./src/dialog-interaction.mjs",
+  "./src/local-agent-gate.mjs",
   "./src/harness.mjs",
   "./src/local-agent-client.mjs",
   "./src/pair.mjs",
@@ -35,7 +37,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((names) => Promise.all(
-        names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name)),
+        names
+          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .map((name) => caches.delete(name)),
       ))
       .then(() => self.clients.claim()),
   );

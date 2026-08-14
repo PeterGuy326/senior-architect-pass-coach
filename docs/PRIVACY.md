@@ -2,7 +2,7 @@
 
 ## 默认不收集
 
-当前版本没有遥测、云端账号或项目自建的云端学习接口。网页 `content-only` 不上传用户问题、答案、错题或学习状态；任务安排、判分与进度写入都在浏览器内完成。浏览器会从 `raw.githubusercontent.com` 读取固定 commit 的公开题库文件，因此 GitHub 作为内容托管方会看到普通网络请求元数据（例如 IP、User-Agent）；请求不携带私人档案、作答或学习进度，也不使用 GitHub API。
+当前版本没有遥测、云端账号或项目自建的云端学习接口。Pages 不提供 `content-only` 浏览器 Chatbot；只有用户显式连接 Runtime 并选择实际可用的本机 Agent 后，才会恢复或创建档案并开放学习流程。任务安排、固定判分与进度写入仍在浏览器内完成。浏览器会从 `raw.githubusercontent.com` 读取固定 commit 的公开题库文件，因此 GitHub 作为内容托管方会看到普通网络请求元数据（例如 IP、User-Agent）；请求不携带私人档案、作答或学习进度，也不使用 GitHub API。
 
 网页的个人档案、派生进度、无题文作答证据和最小会话状态只存于当前站点的 IndexedDB。作答证据可包含有界的前台有效用时、首次选择用时、改选次数和派生行为信号；不保存按键流、焦点历史、选择轨迹或选择哈希。网页不持久化题干、选项、原始 response、参考答案或解析；Service Worker 只缓存本项目同源静态文件，不缓存外部题库正文。用户可以主动导出/导入无题文 JSON 档案，或在页面中一键清除当前浏览器数据。
 
@@ -10,7 +10,7 @@
 
 纯静态网页只能提供教学体验上的答案门：作答前不把答案放进页面 DOM 或主线程状态。它无法阻止设备所有者用开发者工具查看网络响应或修改 IndexedDB，因此不把客户端存储宣称为防篡改、认证或真正的答案保密边界；若未来需要这些能力，必须引入明确披露的服务端。
 
-用户显式连接 Local Agent Runtime 并选择兼容引擎时，本轮去标识化进度摘要、自然语言追问和必要的公开题面会交给所选 Agent Host 及其配置的模型服务；提交后，本地判题产生的作答、参考答案和解析也会作为受信材料进入该轮。去标识化摘要可以携带 `revision_heavy`、`early_choice_ambiguous`、`extended_duration`、`clean_inferred_correct` 等有界派生原因码，但不会携带精确答题秒数、焦点记录、改选次数、个人节奏基线或选择轨迹。是否离开本机取决于该 Host 的模型服务和账号配置。系统不会静默从 `content-only` 切换到模型模式，Agent 失败也不会改写或回滚浏览器进度。
+用户显式连接 Local Agent Runtime 并选择兼容引擎时，本轮去标识化进度摘要、自然语言追问和必要的公开题面会交给所选 Agent Host 及其配置的模型服务；提交后，本地判题产生的作答、参考答案和解析也会作为受信材料进入该轮。去标识化摘要可以携带 `revision_heavy`、`early_choice_ambiguous`、`extended_duration`、`clean_inferred_correct` 等有界派生原因码，但不会携带精确答题秒数、焦点记录、改选次数、个人节奏基线或选择轨迹。是否离开本机取决于该 Host 的模型服务和账号配置。系统不会静默改选 Agent；连接、授权失效或 Runtime 断连会重新锁定 Page，不会启用浏览器伪聊天，也不会改写或回滚已提交的浏览器进度。单轮模型执行失败只显示失败状态并允许重试，不会伪造回答。
 
 Runtime API 只监听 `127.0.0.1`。Pages 加载时不会扫描本机端口；只有用户点击“连接本机 Agent”后，才会打开 Runtime 自己的确认页。bootstrap 只允许该 loopback 同源确认页调用，签发的 Bearer 绑定到精确的正式 Pages Origin；确认页通过带随机 state、精确目标 Origin 的 `postMessage` 发回授权，Pages 还会校验消息来源、窗口引用、协议版本、token 格式和 Runtime instance。后续 CORS 不使用 `*` 或 cookie credentials。
 
@@ -22,7 +22,7 @@ Codex 个人模式不是 Digital Employee 的合格 Adapter。当前 stock Codex
 
 GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的 IndexedDB。确认页不读取、复制或保存学习档案；所有题目、作答和进度继续保存在原 Pages Origin，因此 Agent 配对不需要档案导出、导入或合并。导出仍只用于用户主动备份或换浏览器。
 
-桌面 Chrome/Edge 是当前 Agent 配对主路径。Safari、Firefox、受管浏览器或移动端如果阻止公开 HTTPS 页面访问本机 HTTP loopback，会保留 `content-only`，不改写已有状态。移动设备的 `127.0.0.1` 指向设备自身，Runtime 也不会监听 LAN 地址来绕过浏览器和网络边界。
+桌面 Chrome/Edge 是当前 Agent 配对主路径。Safari、Firefox、受管浏览器或移动端如果阻止公开 HTTPS 页面访问本机 HTTP loopback，Page 会保持锁定且不改写已有状态。移动设备的 `127.0.0.1` 指向设备自身，Runtime 也不会监听 LAN 地址来绕过浏览器和网络边界。
 
 `npm install` 会连接用户配置的 npm registry；这属于依赖安装，不是学习数据上传。`validate-package` 和 `eval-package` 本身离线运行，不调用模型。
 
@@ -50,4 +50,4 @@ GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的
 
 ## 删除数据
 
-当前没有云端副本。网页用户可点击“清除本机数据”，也可通过浏览器的网站数据设置删除；CLI 用户可以在停止 CLI 后删除自己的用户数据目录。删除前如需保留网页进度，应先主动导出档案。代码仓库不包含可用于恢复私人状态的副本。
+当前没有云端副本。连接 Agent 后，网页用户可点击“清除本机数据”；即使 Runtime 不可用，也始终可以通过浏览器的网站数据设置删除该 Origin 的 IndexedDB 与缓存。CLI 用户可以在停止 CLI 后删除自己的用户数据目录。删除前如需保留网页进度，应先主动导出档案。代码仓库不包含可用于恢复私人状态的副本。
