@@ -14,7 +14,7 @@ import { CoachError } from "./errors.mjs";
 import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validator.mjs";
 
 export const CODEX_PERSONAL_MODE = "codex-personal-experimental";
-export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0"]);
+export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0", "0.147.0"]);
 export const CODEX_MODEL_PREFERENCE_DEFINITIONS = Object.freeze([
   Object.freeze({ id: "lite", label: "轻量", model: "gpt-5.4-mini", reasoning_effort: "low" }),
   Object.freeze({ id: "fast", label: "快速", model: "gpt-5.6-luna", reasoning_effort: "low" }),
@@ -60,7 +60,7 @@ const ALLOWED_EVENT_TYPES = new Set([
   "turn.failed",
   "error",
 ]);
-const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
+export const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
 const PLAN_FOCUS_VALUES = Object.freeze([
   "concept_boundary",
   "failure_mode_mapping",
@@ -580,7 +580,7 @@ function exactObject(value, label) {
   return value;
 }
 
-function trustedGradeFrom(input) {
+export function trustedGradeFrom(input) {
   const materials = input.request?.approved_materials;
   if (!Array.isArray(materials)) {
     throw runnerError("CODEX_PERSONAL_TRUSTED_GRADE_MISSING", "提交结果缺少可信本地判定。 ");
@@ -825,7 +825,7 @@ export function parseCodexJsonl(stdout, { action = "review" } = {}) {
   return action === "submit" ? parseCoachingPlan(value) : parseCoachingText(value);
 }
 
-function renderSubmitPlan(input, plan) {
+export function renderSubmitPlan(input, plan) {
   const grade = trustedGradeFrom(input);
   const focusLabels = Object.freeze({
     concept_boundary: "重画概念边界",
@@ -858,7 +858,7 @@ function sourceRefsFor(input, grade) {
   return [];
 }
 
-function employeeOutputFromTrustedInput(input, coachingText) {
+export function employeeOutputFromTrustedInput(input, coachingText) {
   const action = input.action;
   const isSubmit = action === "submit";
   const grade = isSubmit ? trustedGradeFrom(input) : null;

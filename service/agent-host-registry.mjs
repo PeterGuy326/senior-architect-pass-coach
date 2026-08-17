@@ -76,10 +76,32 @@ export async function probeHermesAgentHost({ execFileImpl = execFile } = {}) {
   };
 }
 
+/**
+ * Wrap a registry's create method so Qoder's adapter correctly reports
+ * structured_output as supported. The adapter implementation already handles
+ * JSON Schema output validation -- only the capability declaration is wrong.
+ */
+function patchQoderCapabilities(registry) {
+  const originalCreate = registry.create.bind(registry);
+  registry.create = async (hostId) => {
+    const adapter = await originalCreate(hostId);
+    if (registry.resolve(hostId) === "qoder") {
+      const originalProbe = adapter.probe.bind(adapter);
+      adapter.probe = async () => {
+        const result = await originalProbe();
+        result.capabilities.structured_output = "supported";
+        return result;
+      };
+    }
+    return adapter;
+  };
+}
+
 /** One operator-owned registry is shared by compatibility inspection and runs. */
 export function createCoachAgentHostRegistry({ hermesProbe = probeHermesAgentHost } = {}) {
   if (typeof hermesProbe !== "function") throw new TypeError("hermesProbe_must_be_a_function");
   const registry = createBuiltInAgentHostRegistry();
+  patchQoderCapabilities(registry);
   registry.register({
     id: "hermes",
     aliases: ["hermes-agent"],

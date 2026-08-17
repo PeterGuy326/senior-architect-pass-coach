@@ -211,7 +211,7 @@ test("probe reports only an audited saved-login personal mode without claiming a
   assert.equal(result.qualified_adapter, false);
   assert.equal(result.adapter_status, "experimental_personal");
   assert.ok(result.reason_codes.includes("digital_employee_adapter_unqualified"));
-  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0"]);
+  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0", "0.147.0"]);
   assert.deepEqual(calls.map((call) => call.args), [["--version"], ["exec", "--help"], ["debug", "models"], ["login", "status"]]);
   assert.deepEqual(result.model_preferences.map(({ id }) => id), ["lite", "fast", "balanced", "deep"]);
   assert.equal(result.default_model_preference, "fast");
@@ -254,7 +254,7 @@ test("probe rejects unaudited versions, unsafe auth, and missing command flags",
   const unaudited = await probeCodexPersonalMode({
     userCodexHome: root,
     authFile,
-    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.147.0", stderr: "" }),
+    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.148.0", stderr: "" }),
   });
   assert.equal(unaudited.status, "incompatible");
   assert.ok(unaudited.reason_codes.includes("codex_version_not_audited"));
