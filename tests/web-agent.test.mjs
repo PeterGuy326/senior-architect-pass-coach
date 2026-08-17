@@ -928,6 +928,85 @@ test("Codex personal consent rejects a selectable response for the wrong adapter
   await assert.rejects(client.consentCodexPersonal(), { code: "INVALID_ADAPTER_RESPONSE" });
 });
 
+test("engine preflight re-probes one adapter and stays bearer-bound and token-free", async () => {
+  const token = "d".repeat(43);
+  const calls = [];
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "hermes-preflight-request",
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: token, instance_id: "codex-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) {
+        return jsonResponse(catalogResponse([{
+          id: "hermes",
+          label: "Hermes Agent",
+          state: "consent_required",
+          selectable: false,
+          reason_codes: ["hermes_local_consent_required"],
+          execution_mode: "personal_experimental",
+          framework_adapter_status: "probe_only",
+        }]));
+      }
+      if (url.endsWith("/v1/adapters/hermes/preflight")) {
+        return jsonResponse({
+          protocol: LOOPBACK_PROTOCOL,
+          adapter: {
+            id: "hermes",
+            label: "Hermes Agent",
+            state: "experimental_personal",
+            selectable: true,
+            reason_codes: ["hermes_local_mode_unqualified"],
+            execution_mode: "personal_experimental",
+            framework_adapter_status: "probe_only",
+          },
+        });
+      }
+      throw new Error(`unexpected endpoint: ${url}`);
+    },
+  });
+  await client.connect();
+
+  const adapter = await client.preflight("hermes");
+  assert.equal(adapter.state, "experimental_personal");
+  assert.equal(adapter.selectable, true);
+  assert.equal(adapter.execution_mode, "personal_experimental");
+  assert.equal(adapter.framework_adapter_status, "probe_only");
+  const request = calls.at(-1);
+  assert.equal(request.url.endsWith("/v1/adapters/hermes/preflight"), true);
+  assert.equal(request.options.method, "POST");
+  assert.deepEqual(JSON.parse(request.options.body), {});
+  assert.equal(request.options.headers.Authorization, `Bearer ${token}`);
+  assert.equal(request.url.includes(token), false);
+  assert.equal(String(request.options.body).includes(token), false);
+});
+
+test("engine preflight rejects an invalid engine before any fetch", async () => {
+  const client = createLocalAgentClient({
+    origin: "http://127.0.0.1:4317",
+    idFactory: () => "hermes-invalid-engine",
+    fetchImpl: async (url) => {
+      if (url.endsWith("/v1/bootstrap")) {
+        return jsonResponse({ protocol: LOOPBACK_PROTOCOL, access_token: "d".repeat(43), instance_id: "codex-runtime" });
+      }
+      if (url.endsWith("/v1/adapters")) {
+        return jsonResponse(catalogResponse([{
+          id: "hermes",
+          label: "Hermes Agent",
+          state: "consent_required",
+          selectable: false,
+        }]));
+      }
+      throw new Error("must not fetch preflight");
+    },
+  });
+  await client.connect();
+  await assert.rejects(client.preflight("content-only"), { code: "INVALID_ENGINE" });
+  await assert.rejects(client.preflight("bad engine!"), { code: "INVALID_ENGINE" });
+});
+
 test("Runtime failures expose only a stable reason code and local message, never server text", async () => {
   let call = 0;
   const client = createLocalAgentClient({

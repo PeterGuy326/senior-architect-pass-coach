@@ -22,6 +22,18 @@ import {
 import { createLocalEmployeeWorkspace } from "./local-employee-workspace.mjs";
 import { employeePackageDirectory, repositoryRoot } from "./paths.mjs";
 import { validateTeachingOutput } from "./proposal-validator.mjs";
+import {
+  QoderLocalRunner,
+  assertQoderCoachingText,
+  probeQoderLocalMode,
+  publicQoderLocalAdapter,
+} from "./qoder-local-runner.mjs";
+import {
+  HermesLocalRunner,
+  assertHermesCoachingText,
+  probeHermesLocalMode,
+  publicHermesLocalAdapter,
+} from "./hermes-local-runner.mjs";
 import { createEmployeeSchemaValidators } from "./schema-validator.mjs";
 
 export const LOOPBACK_PROTOCOL = "coach-loopback.v4";
@@ -624,7 +636,7 @@ function hashToken(token) {
 function matchingGrant(token, grants, origin, now) {
   if (!TOKEN_PATTERN.test(token)) return null;
   const candidate = hashToken(token);
-  return grants.find((grant) => (
+  return grants.findLast((grant) => (
     grant.origin === origin
     && grant.expiresAt > now
     && grant.hash.length === candidate.length
@@ -806,6 +818,18 @@ export class LocalAgentRuntime {
       validateOutput: schemaValidators.validateEmployeeOutput,
       modelPreference,
     }),
+    qoderLocalProbe = probeQoderLocalMode,
+    qoderLocalRunnerFactory = ({ personalAuthConsent, schemaValidators }) => new QoderLocalRunner({
+      personalAuthConsent,
+      validateInput: schemaValidators.validateEmployeeInput,
+      validateOutput: schemaValidators.validateEmployeeOutput,
+    }),
+    hermesLocalProbe = probeHermesLocalMode,
+    hermesLocalRunnerFactory = ({ personalAuthConsent, schemaValidators }) => new HermesLocalRunner({
+      personalAuthConsent,
+      validateInput: schemaValidators.validateEmployeeInput,
+      validateOutput: schemaValidators.validateEmployeeOutput,
+    }),
     tokenFactory = () => randomBytes(32).toString("base64url"),
     serverFactory = createServer,
     employeeDirectory = employeePackageDirectory,
@@ -836,6 +860,14 @@ export class LocalAgentRuntime {
     if (typeof codexPersonalProbe !== "function") throw new TypeError("codexPersonalProbe_required");
     if (typeof codexPersonalRunnerFactory !== "function") {
       throw new TypeError("codexPersonalRunnerFactory_required");
+    }
+    if (typeof qoderLocalProbe !== "function") throw new TypeError("qoderLocalProbe_required");
+    if (typeof qoderLocalRunnerFactory !== "function") {
+      throw new TypeError("qoderLocalRunnerFactory_required");
+    }
+    if (typeof hermesLocalProbe !== "function") throw new TypeError("hermesLocalProbe_required");
+    if (typeof hermesLocalRunnerFactory !== "function") {
+      throw new TypeError("hermesLocalRunnerFactory_required");
     }
     if (typeof workspaceFactory !== "function") throw new TypeError("workspaceFactory_required");
     if (typeof schemaValidatorsFactory !== "function") throw new TypeError("schemaValidatorsFactory_required");
@@ -884,6 +916,10 @@ export class LocalAgentRuntime {
     this.schemaValidatorsFactory = schemaValidatorsFactory;
     this.codexPersonalProbe = codexPersonalProbe;
     this.codexPersonalRunnerFactory = codexPersonalRunnerFactory;
+    this.qoderLocalProbe = qoderLocalProbe;
+    this.qoderLocalRunnerFactory = qoderLocalRunnerFactory;
+    this.hermesLocalProbe = hermesLocalProbe;
+    this.hermesLocalRunnerFactory = hermesLocalRunnerFactory;
     this.tokenFactory = tokenFactory;
     this.serverFactory = serverFactory;
     this.employeeDirectory = employeeDirectory;
@@ -1034,6 +1070,28 @@ export class LocalAgentRuntime {
         consented: grant?.codexPersonalConsent === true,
       });
     }
+    if (engine === "qoder") {
+      let probe;
+      try {
+        probe = await this.qoderLocalProbe();
+      } catch {
+        probe = { status: "unavailable", available: false, reason_codes: ["qoder_status_probe_failed"] };
+      }
+      return publicQoderLocalAdapter(entry, probe, {
+        consented: grant?.qoderLocalConsent === true,
+      });
+    }
+    if (engine === "hermes") {
+      let probe;
+      try {
+        probe = await this.hermesLocalProbe();
+      } catch {
+        probe = { status: "unavailable", available: false, reason_codes: ["hermes_status_probe_failed"] };
+      }
+      return publicHermesLocalAdapter(entry, probe, {
+        consented: grant?.hermesLocalConsent === true,
+      });
+    }
     let inspection;
     try {
       inspection = await this.inspectAdapter({
@@ -1091,6 +1149,8 @@ export class LocalAgentRuntime {
         origin: grantOrigin,
         expiresAt: this.clock() + this.grantLifetimeMs,
         codexPersonalConsent: false,
+        qoderLocalConsent: false,
+        hermesLocalConsent: false,
       });
       if (this.bearerGrants.length > MAX_BEARER_HASHES) this.bearerGrants.shift();
       sendJson(response, 200, {
@@ -1126,6 +1186,38 @@ export class LocalAgentRuntime {
       }
       grant.codexPersonalConsent = true;
       const adapter = await this.inspect("codex", { grant });
+      sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapter });
+      return;
+    }
+    if (pathname === "/v1/adapters/qoder/personal-consent") {
+      if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
+      const grant = this.#assertProtected(request);
+      const { value } = await readJson(request, this.maxBodyBytes);
+      exactObject(value, ["consent_version", "accepted"]);
+      if (
+        value.consent_version !== "qoder-local-consent.v1"
+        || value.accepted !== true
+      ) {
+        throw requestError("INVALID_REQUEST");
+      }
+      grant.qoderLocalConsent = true;
+      const adapter = await this.inspect("qoder", { grant });
+      sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapter });
+      return;
+    }
+    if (pathname === "/v1/adapters/hermes/personal-consent") {
+      if (request.method !== "POST") throw requestError("METHOD_NOT_ALLOWED");
+      const grant = this.#assertProtected(request);
+      const { value } = await readJson(request, this.maxBodyBytes);
+      exactObject(value, ["consent_version", "accepted"]);
+      if (
+        value.consent_version !== "hermes-local-consent.v1"
+        || value.accepted !== true
+      ) {
+        throw requestError("INVALID_REQUEST");
+      }
+      grant.hermesLocalConsent = true;
+      const adapter = await this.inspect("hermes", { grant });
       sendJson(response, 200, { protocol: LOOPBACK_PROTOCOL, adapter });
       return;
     }
@@ -1346,7 +1438,16 @@ export class LocalAgentRuntime {
       this.schemaValidators.validateEmployeeInput,
     );
     const isCodex = request.engine === "codex";
+    const isQoderLocal = request.engine === "qoder";
+    const isHermesLocal = request.engine === "hermes";
+    const isPersonal = isCodex || isQoderLocal || isHermesLocal;
     if (isCodex && grant?.codexPersonalConsent !== true) {
+      throw requestError("ADAPTER_NOT_SELECTABLE");
+    }
+    if (isQoderLocal && grant?.qoderLocalConsent !== true) {
+      throw requestError("ADAPTER_NOT_SELECTABLE");
+    }
+    if (isHermesLocal && grant?.hermesLocalConsent !== true) {
       throw requestError("ADAPTER_NOT_SELECTABLE");
     }
     const modelPreference = isCodex
@@ -1355,8 +1456,8 @@ export class LocalAgentRuntime {
     if (isCodex && !CODEX_MODEL_PREFERENCE_IDS.has(modelPreference)) {
       throw requestError("INVALID_REQUEST");
     }
-    const adapter = isCodex ? null : await this.inspect(request.engine, { grant });
-    if (!isCodex && !adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
+    const adapter = isPersonal ? null : await this.inspect(request.engine, { grant });
+    if (!isPersonal && !adapter.selectable) throw requestError("ADAPTER_NOT_SELECTABLE");
     let output;
     try {
       const runner = isCodex
@@ -1365,7 +1466,17 @@ export class LocalAgentRuntime {
             schemaValidators: this.schemaValidators,
             modelPreference,
           })
-        : this.runnerFactory({
+        : isQoderLocal
+          ? this.qoderLocalRunnerFactory({
+            personalAuthConsent: grant?.qoderLocalConsent === true,
+            schemaValidators: this.schemaValidators,
+          })
+          : isHermesLocal
+            ? this.hermesLocalRunnerFactory({
+              personalAuthConsent: grant?.hermesLocalConsent === true,
+              schemaValidators: this.schemaValidators,
+            })
+            : this.runnerFactory({
             engine: request.engine,
             hostRegistry: this.hostRegistry,
             directory: this.workspace.directory,
@@ -1373,10 +1484,10 @@ export class LocalAgentRuntime {
       if (!runner || typeof runner.preflight !== "function" || typeof runner.run !== "function") {
         throw new Error("invalid_runner");
       }
-      // CodexPersonalRunner.run() owns its per-turn re-attestation. Calling its
-      // preflight here as well would probe the same local catalog twice before
+      // Personal runners own their per-turn re-attestation. Calling their
+      // preflight here as well would probe the same local CLI twice before
       // every response. Qualified framework runners retain the explicit gate.
-      if (!isCodex) await runner.preflight({ signal });
+      if (!isPersonal) await runner.preflight({ signal });
       output = await runner.run(input, {
         runId: `loopback-${randomUUID()}`,
         signal,
@@ -1395,6 +1506,12 @@ export class LocalAgentRuntime {
       else validateQuestionFacts(output, request);
       const summary = sanitizeCoachingText(output.teaching_result.summary);
       if (request.engine === "codex") assertCodexCoachingText(summary);
+      if (request.engine === "qoder" && request.trustedGrade === null) {
+        assertQoderCoachingText(summary);
+      }
+      if (request.engine === "hermes" && request.trustedGrade === null) {
+        assertHermesCoachingText(summary);
+      }
       if (
         containsSensitiveText(summary)
         || (request.publicQuestion && !request.trustedGrade && HIDDEN_ANSWER_HINT.test(summary))
@@ -1409,8 +1526,8 @@ export class LocalAgentRuntime {
         coaching_text: summary,
         answer_visibility: request.trustedGrade ? "revealed_after_submission" : "hidden",
         progress_write: "not_performed",
-        execution_mode: request.engine === "codex" ? "personal_experimental" : "qualified_adapter",
-        framework_adapter_status: request.engine === "codex" ? "probe_only" : "runnable",
+        execution_mode: isPersonal ? "personal_experimental" : "qualified_adapter",
+        framework_adapter_status: isPersonal ? "probe_only" : "runnable",
         model_preference: modelPreference,
         stages: [
           { id: "request_validated", status: "completed" },

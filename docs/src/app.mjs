@@ -60,6 +60,14 @@ const elements = Object.freeze({
   modelProfilePanel: document.querySelector("#model-profile-panel"),
   modelProfileList: document.querySelector("#model-profile-list"),
   engineDialogStatus: document.querySelector("#engine-dialog-status"),
+  engineHelpPanel: document.querySelector("#engine-help-panel"),
+  engineHelpClose: document.querySelector("#engine-help-close"),
+  engineHelpTitle: document.querySelector("#engine-help-title"),
+  engineHelpCopy: document.querySelector("#engine-help-copy"),
+  engineHelpCommand: document.querySelector("#engine-help-command"),
+  engineHelpLink: document.querySelector("#engine-help-link"),
+  engineHelpRetest: document.querySelector("#engine-help-retest"),
+  engineHelpStatus: document.querySelector("#engine-help-status"),
   runtimeConnect: document.querySelector("#runtime-connect"),
   runtimeInstallLink: document.querySelector("#runtime-install-link"),
   runtimeCalloutCopy: document.querySelector("#runtime-callout-copy"),
@@ -158,7 +166,7 @@ const STATIC_AGENT_CATALOG = Object.freeze([
     label: "Hermes Agent (Nous Research)",
     state: "probe_only",
     selectable: false,
-    detail: "可以探测本机安装，但尚无通过本私教契约的运行 Adapter。",
+    detail: "可以探测本机安装；连接后可明确同意使用本机个人实验模式。",
   }),
 ]);
 const ADAPTER_STATE_LABELS = Object.freeze({
@@ -189,13 +197,56 @@ const ADAPTER_REASON_LABELS = Object.freeze({
   codex_login_required: "请先在本机 Codex CLI 登录 ChatGPT",
   codex_executable_not_found: "本机未发现 Codex CLI",
   codex_version_probe_failed: "Codex CLI 版本检测失败",
-  codex_version_not_audited: "当前只开放已审计的 Codex CLI 0.146.0",
+  codex_version_not_audited: "当前只开放已审计的 Codex CLI 0.146.0 / 0.147.0",
   codex_auth_file_missing: "未找到可供本机个人模式复用的 Codex 登录",
   codex_auth_file_unsafe: "Codex 登录文件类型或权限不符合安全要求",
   codex_command_surface_unsupported: "Codex CLI 命令面与已审计版本不一致",
-  hermes_adapter_not_implemented: "Digital Employee 尚无合格的 Hermes 运行适配器",
+  qoder_local_consent_required: "需明确同意复用本机 Qoder CLI 登录",
+  qoder_local_mode_unqualified: "本机模式尚未通过 Digital Employee 工具白名单认证",
+  qoder_login_required: "请先在本机完成 qodercli 登录",
+  qoder_executable_not_found: "本机未发现 Qoder CLI",
+  qoder_status_probe_failed: "Qoder CLI 状态检测失败",
+  qoder_status_invalid: "Qoder CLI 状态输出无效",
+  hermes_local_consent_required: "需明确同意复用本机 Hermes 登录",
+  hermes_local_mode_unqualified: "本机模式尚未通过 Digital Employee 工具白名单认证",
+  hermes_login_required: "请先在本机完成 hermes 登录",
   hermes_executable_not_found: "本机未发现 Hermes Agent",
+  hermes_status_probe_failed: "Hermes Agent 状态检测失败",
+  hermes_status_invalid: "Hermes Agent 状态输出无效",
+  hermes_adapter_not_implemented: "Digital Employee 尚无合格的 Hermes 运行适配器",
   hermes_version_probe_failed: "Hermes Agent 版本检测失败",
+});
+const ENGINE_INSTALL_GUIDES = Object.freeze({
+  codex: Object.freeze({
+    title: "启用 Codex CLI",
+    copy: "Codex CLI 未安装或尚未登录。请先在本机安装并登录 OpenAI Codex，之后点“重新检测”；"
+      + "本机复用你已登录的 ChatGPT / Codex 账号，无需配置服务令牌。",
+    command: "codex install",
+    href: "https://github.com/openai/codex",
+  }),
+  qoder: Object.freeze({
+    title: "启用 Qoder CLI",
+    copy: "Qoder CLI 未安装或尚未登录。请先在本机安装并登录 Qoder CLI，之后点“重新检测”；"
+      + "本机复用你已登录的 Qoder 账号，无需配置服务令牌。",
+    command: null,
+    href: "https://docs.qoder.com",
+  }),
+  hermes: Object.freeze({
+    title: "启用 Hermes Agent",
+    copy: "Hermes Agent 未安装或尚未配置模型凭据。请先在终端执行官方安装命令并完成配置，之后点“重新检测”；"
+      + "本机复用 ~/.hermes/.env 里你已配置的凭据，无需在这里填写任何令牌。",
+    command: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+    href: "https://hermes-agent.nousresearch.com",
+  }),
+});
+const ENGINE_HELP_REASONS = Object.freeze({
+  codex_executable_not_found: "codex",
+  codex_login_required: "codex",
+  codex_auth_file_missing: "codex",
+  qoder_executable_not_found: "qoder",
+  qoder_login_required: "qoder",
+  hermes_executable_not_found: "hermes",
+  hermes_login_required: "hermes",
 });
 
 function safeMessage(error, fallback = "本机 Agent 暂时无法继续，请稍后重试。") {
@@ -497,6 +548,54 @@ function updateEngineUi(message = "") {
   syncAgentGate(agentSelected ? "" : message);
 }
 
+function engineHelpEngine(adapter) {
+  const reasons = Array.isArray(adapter?.reasons) ? adapter.reasons : [];
+  for (const reason of reasons) {
+    if (ENGINE_HELP_REASONS[reason] && ENGINE_INSTALL_GUIDES[ENGINE_HELP_REASONS[reason]]) {
+      return ENGINE_HELP_REASONS[reason];
+    }
+  }
+  return null;
+}
+
+function openEngineHelp(engine) {
+  const guide = ENGINE_INSTALL_GUIDES[engine];
+  if (!guide || !localAgentClient?.connected) return false;
+  elements.engineHelpTitle.textContent = guide.title;
+  elements.engineHelpCopy.textContent = guide.copy;
+  elements.engineHelpCommand.textContent = guide.command || "";
+  elements.engineHelpCommand.hidden = !guide.command;
+  elements.engineHelpLink.href = guide.href;
+  elements.engineHelpLink.hidden = !guide.href;
+  elements.engineHelpStatus.textContent = "";
+  elements.engineHelpRetest.dataset.engine = engine;
+  elements.engineHelpPanel.hidden = false;
+  elements.engineHelpClose.focus({ preventScroll: true });
+  return true;
+}
+
+function closeEngineHelp() {
+  elements.engineHelpPanel.hidden = true;
+  elements.engineHelpStatus.textContent = "";
+  delete elements.engineHelpRetest.dataset.engine;
+}
+
+async function retestEngineHelp() {
+  const engine = elements.engineHelpRetest.dataset.engine;
+  if (!engine || operating || connectingRuntime) return;
+  elements.engineHelpStatus.textContent = "正在重新检测本机安装……";
+  try {
+    const refreshed = await localAgentClient.preflight(engine);
+    runtimeAdapters = runtimeAdapters.map((item) => item.id === engine ? refreshed : item);
+    elements.engineHelpStatus.textContent = refreshed.selectable === true
+      ? "检测完成：已就绪，可以直接点引擎卡片同意启用。"
+      : `检测完成：${adapterDiagnostic(refreshed) || "仍不可用"}。`;
+    renderEngineList();
+  } catch (error) {
+    elements.engineHelpStatus.textContent = safeMessage(error, "重新检测失败；请确认 Runtime 仍在运行。");
+  }
+}
+
 function createEngineCard({ id, label, state, detail, reasons = [], selectable = false }) {
   const button = document.createElement("button");
   button.className = "engine-card";
@@ -504,10 +603,11 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
   button.dataset.engine = id;
   button.dataset.engineState = state;
   const directConnect = !localAgentClient?.connected && DIRECT_CONNECT_AGENT_IDS.has(id);
-  const actionable = selectable || state === "consent_required" || directConnect;
+  const helpEngine = localAgentClient?.connected ? engineHelpEngine({ id, reasons }) : null;
+  const actionable = selectable || state === "consent_required" || directConnect || helpEngine !== null;
   button.dataset.engineSelectable = selectable ? "true" : "false";
   button.dataset.engineActionable = actionable ? "true" : "false";
-  button.dataset.engineEntry = directConnect ? "direct" : "status";
+  button.dataset.engineEntry = directConnect ? "direct" : (helpEngine ? "help" : "status");
   button.setAttribute("aria-pressed", id === selectedEngine ? "true" : "false");
   button.disabled = operating || connectingRuntime || !actionable;
 
@@ -518,13 +618,19 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
   status.className = "engine-card__state";
   status.textContent = directConnect
     ? "点击接入 →"
-    : (ADAPTER_STATE_LABELS[state] || state);
+    : helpEngine
+      ? "查看安装 / 登录引导 →"
+      : (ADAPTER_STATE_LABELS[state] || state);
   const copy = document.createElement("span");
   copy.className = "engine-card__detail";
   const reasonCopy = reasons.map((reason) => ADAPTER_REASON_LABELS[reason] || "需要在本机 Runtime 查看诊断");
   copy.textContent = [detail, ...new Set(reasonCopy)].filter(Boolean).join(" · ").slice(0, 720) || "状态由本机 Runtime 报告。";
   button.append(title, status, copy);
   button.addEventListener("click", () => {
+    if (helpEngine) {
+      openEngineHelp(helpEngine);
+      return;
+    }
     void selectEngine(id).catch((error) => {
       updateEngineUi(safeMessage(error, "目标 Agent 未能进入对话；学习档案没有变化，私教仍保持锁定。"));
     });
@@ -577,6 +683,28 @@ async function enterAgentConversation(engine) {
   elements.input.focus({ preventScroll: true });
 }
 
+function personalConsentConfirmText(engine) {
+  if (engine === "codex") {
+    return "启用 Codex CLI 个人实验模式？\n\n"
+      + "它会复用你本机已登录的 ChatGPT / Codex 账号。提交后只向 Codex 发送科目、考点、掌握结果和去身份化进度，"
+      + "不发送题干、选项、你的作答、参考答案、解析或登录文件内容；Codex 只能选择一个补救计划，由本地模板显示。"
+      + "无题面复习时，你主动输入的追问会由 Codex 发往 OpenAI。学习进度仍由浏览器 Harness 决定。"
+      + "此模式尚未通过 Digital Employee 工具白名单认证，授权仅在当前 Runtime 内存中有效。";
+  }
+  if (engine === "hermes") {
+    return "启用 Hermes Agent 本机模式？\n\n"
+      + "它会复用你本机已登录的 Hermes Agent 账号，不需要配置任何服务令牌。"
+      + "提交后只向 Hermes 发送科目、考点、掌握结果和去身份化进度；当前题引导时会附上题目本身但绝不附带答案。"
+      + "你主动输入的追问会由 Hermes 发往其在线服务。学习进度仍由浏览器 Harness 决定。"
+      + "此模式尚未通过 Digital Employee 工具白名单认证，授权仅在当前 Runtime 内存中有效。";
+  }
+  return "启用 Qoder CLI 本机模式？\n\n"
+    + "它会直接复用你本机已登录的 Qoder CLI 账号，不需要配置任何服务令牌。"
+    + "提交后只向 Qoder 发送科目、考点、掌握结果和去身份化进度；当前题引导时会附上题目本身但绝不附带答案。"
+    + "你主动输入的追问会由 Qoder 发往其在线服务。学习进度仍由浏览器 Harness 决定。"
+    + "此模式尚未通过 Digital Employee 工具白名单认证，授权仅在当前 Runtime 内存中有效。";
+}
+
 async function selectEngine(engine, { enterConversation = true } = {}) {
   if (operating || connectingRuntime) return;
   if (engine === "content-only") return false;
@@ -586,29 +714,27 @@ async function selectEngine(engine, { enterConversation = true } = {}) {
       if (!DIRECT_CONNECT_AGENT_IDS.has(engine)) return false;
       return connectRuntime({ preferredEngine: engine });
     }
-    if (engine === "codex" && adapter?.state === "consent_required") {
-      const accepted = window.confirm(
-        "启用 Codex CLI 个人实验模式？\n\n"
-        + "它会复用你本机已登录的 ChatGPT / Codex 账号。提交后只向 Codex 发送科目、考点、掌握结果和去身份化进度，"
-        + "不发送题干、选项、你的作答、参考答案、解析或登录文件内容；Codex 只能选择一个补救计划，由本地模板显示。"
-        + "无题面复习时，你主动输入的追问会由 Codex 发往 OpenAI。学习进度仍由浏览器 Harness 决定。"
-        + "此模式尚未通过 Digital Employee 工具白名单认证，授权仅在当前 Runtime 内存中有效。",
-      );
+    if ((engine === "codex" || engine === "qoder" || engine === "hermes") && adapter?.state === "consent_required") {
+      const accepted = window.confirm(personalConsentConfirmText(engine));
       if (!accepted) {
-        updateEngineUi("已取消 Codex 个人实验模式；学习档案没有变化，私教仍保持锁定。");
+        updateEngineUi(`已取消 ${engineDisplayName(engine)} 本机模式；学习档案没有变化，私教仍保持锁定。`);
         return false;
       }
       connectingRuntime = true;
       renderEngineList();
-      updateEngineUi("正在为当前内存授权启用 Codex 个人实验模式……");
+      updateEngineUi(`正在为当前内存授权启用 ${engineDisplayName(engine)} 本机模式……`);
       let consentError = "";
       try {
-        const refreshed = await localAgentClient.consentCodexPersonal();
-        runtimeAdapters = runtimeAdapters.map((item) => item.id === "codex" ? refreshed : item);
+        const refreshed = engine === "codex"
+          ? await localAgentClient.consentCodexPersonal()
+          : engine === "qoder"
+            ? await localAgentClient.consentQoderLocal()
+            : await localAgentClient.consentHermesLocal();
+        runtimeAdapters = runtimeAdapters.map((item) => item.id === engine ? refreshed : item);
         adapter = refreshed;
       } catch (error) {
         adapter = null;
-        consentError = safeMessage(error, "Codex 个人实验模式未能启用；学习档案没有变化。");
+        consentError = safeMessage(error, `${engineDisplayName(engine)} 本机模式未能启用；学习档案没有变化。`);
       } finally {
         connectingRuntime = false;
         renderEngineList();
@@ -740,6 +866,7 @@ function setupEngineControls() {
   elements.engineDialog.addEventListener("close", () => {
     elements.engineTrigger.setAttribute("aria-expanded", "false");
     elements.agentGateConnect.setAttribute("aria-expanded", "false");
+    closeEngineHelp();
     responseTimer.setVisible(answerSurfaceVisible());
     const focusTarget = dialogFocusAfterClose || dialogReturnFocus || elements.engineTrigger;
     dialogFocusAfterClose = null;
@@ -753,6 +880,8 @@ function setupEngineControls() {
     }
   });
   elements.engineDialogClose.addEventListener("click", () => requestEngineDialogClose());
+  elements.engineHelpClose.addEventListener("click", closeEngineHelp);
+  elements.engineHelpRetest.addEventListener("click", () => { void retestEngineHelp(); });
   elements.engineDialog.addEventListener("pointerdown", (event) => {
     pointerStartedOnBackdrop = backdropPoint(event);
   });

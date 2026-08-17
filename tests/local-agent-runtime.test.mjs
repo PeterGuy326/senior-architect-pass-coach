@@ -184,6 +184,12 @@ async function fixture(options = {}) {
     codexProbes: 0,
     codexPreflights: 0,
     codexRuns: [],
+    qoderProbes: 0,
+    qoderPreflights: 0,
+    qoderRuns: [],
+    hermesProbes: 0,
+    hermesPreflights: 0,
+    hermesRuns: [],
   };
   const inspectAdapter = options.inspectAdapter || (async ({ engine, directory: packageDirectory, hostRegistry }) => {
     calls.inspections.push({ engine, packageDirectory, hostRegistry });
@@ -245,6 +251,66 @@ async function fixture(options = {}) {
       },
     };
   });
+  const qoderLocalProbeImpl = options.qoderLocalProbe || (async () => ({
+    mode: "qoder-local-experimental",
+    engine: "qoder",
+    status: "ready",
+    available: true,
+    selectable: true,
+    version: "1.1.23",
+    authentication: "existing_local_qoder_login",
+    adapter_status: "experimental_personal",
+    qualified_adapter: false,
+    reason_codes: ["digital_employee_adapter_unqualified", "qoder_local_login_reused"],
+  }));
+  const qoderLocalProbe = async (...args) => {
+    calls.qoderProbes += 1;
+    return qoderLocalProbeImpl(...args);
+  };
+  const qoderLocalRunnerFactory = options.qoderLocalRunnerFactory || (({ personalAuthConsent }) => {
+    const preflight = async () => {
+      assert.equal(personalAuthConsent, true);
+      calls.qoderPreflights += 1;
+    };
+    return {
+      preflight,
+      async run(input) {
+        await preflight();
+        calls.qoderRuns.push(input);
+        return completedSubmitOutput("Qoder local coaching.");
+      },
+    };
+  });
+  const hermesLocalProbeImpl = options.hermesLocalProbe || (async () => ({
+    mode: "hermes-local-experimental",
+    engine: "hermes",
+    status: "ready",
+    available: true,
+    selectable: true,
+    version: "0.20.1",
+    authentication: "existing_local_hermes_login",
+    adapter_status: "experimental_personal",
+    qualified_adapter: false,
+    reason_codes: ["digital_employee_adapter_unqualified", "hermes_local_login_reused"],
+  }));
+  const hermesLocalProbe = async (...args) => {
+    calls.hermesProbes += 1;
+    return hermesLocalProbeImpl(...args);
+  };
+  const hermesLocalRunnerFactory = options.hermesLocalRunnerFactory || (({ personalAuthConsent }) => {
+    const preflight = async () => {
+      assert.equal(personalAuthConsent, true);
+      calls.hermesPreflights += 1;
+    };
+    return {
+      preflight,
+      async run(input) {
+        await preflight();
+        calls.hermesRuns.push(input);
+        return completedSubmitOutput("Hermes local coaching.");
+      },
+    };
+  });
   const runtime = createLocalAgentRuntime({
     docsRoot: directory,
     port: 0,
@@ -252,6 +318,10 @@ async function fixture(options = {}) {
     runnerFactory,
     codexPersonalProbe,
     codexPersonalRunnerFactory,
+    qoderLocalProbe,
+    qoderLocalRunnerFactory,
+    hermesLocalProbe,
+    hermesLocalRunnerFactory,
     ...(options.workspaceFactory ? { workspaceFactory: options.workspaceFactory } : {}),
     ...(options.schemaValidatorsFactory ? { schemaValidatorsFactory: options.schemaValidatorsFactory } : {}),
     tokenFactory: () => TOKEN,
@@ -592,17 +662,14 @@ test("CORS preflight allows only the exact Pages origin, route method, headers a
   }
 });
 
-test("adapter discovery distinguishes Codex personal consent from qualified framework adapters", async (t) => {
+test("adapter discovery distinguishes personal local paths from qualified framework adapters", async (t) => {
   const environment = await fixture({
     inspectAdapter: async ({ engine }) => {
       if (engine === "qoder") {
-        return readyInspection({
-          compatibility: {
-            compatible: false,
-            missing: ["structured_output"],
-            issues: [{ code: "required_capability_unsupported", message: "secret", blocking: true }],
-          },
-        });
+        throw new Error("qoder must use the local login path, not the framework adapter");
+      }
+      if (engine === "hermes") {
+        throw new Error("hermes must use the local login path, not the framework adapter");
       }
       if (engine === "qwen-code") return readyInspection();
       if (engine === "codebuddy") {
@@ -632,15 +699,31 @@ test("adapter discovery distinguishes Codex personal consent from qualified fram
     "codex_personal_mode_unqualified",
     "codex_personal_consent_required",
   ]);
-  assert.equal(byId.qoder.state, "incompatible");
+  assert.equal(byId.qoder.state, "consent_required");
   assert.equal(byId.qoder.selectable, false);
+  assert.equal(byId.qoder.execution_mode, "personal_experimental");
+  assert.equal(byId.qoder.framework_adapter_status, "probe_only");
+  assert.equal(byId.qoder.adapter_status, "experimental_personal");
+  assert.equal(byId.qoder.version, "1.1.23");
+  assert.deepEqual(byId.qoder.reason_codes, [
+    "qoder_local_mode_unqualified",
+    "qoder_local_consent_required",
+  ]);
   assert.equal(byId["qwen-code"].state, "ready");
   assert.equal(byId["qwen-code"].selectable, true);
   assert.equal(byId.codebuddy.state, "needs_configuration");
   assert.equal(byId.codebuddy.selectable, false);
   assert.equal(byId["claude-code"].state, "unavailable");
-  assert.equal(byId.hermes.state, "unavailable");
+  assert.equal(byId.hermes.state, "consent_required");
   assert.equal(byId.hermes.selectable, false);
+  assert.equal(byId.hermes.execution_mode, "personal_experimental");
+  assert.equal(byId.hermes.framework_adapter_status, "probe_only");
+  assert.equal(byId.hermes.adapter_status, "experimental_personal");
+  assert.equal(byId.hermes.version, "0.20.1");
+  assert.deepEqual(byId.hermes.reason_codes, [
+    "hermes_local_mode_unqualified",
+    "hermes_local_consent_required",
+  ]);
   assert.doesNotMatch(JSON.stringify(response.body), /private|secret|directory|path must/u);
 
   const preflight = await json(await fetch(`${environment.runtime.origin}/v1/adapters/qoder/preflight`, {
@@ -649,6 +732,15 @@ test("adapter discovery distinguishes Codex personal consent from qualified fram
     body: "{}",
   }));
   assert.equal(preflight.body.adapter.selectable, false);
+  assert.equal(environment.calls.qoderProbes, 2);
+
+  const hermesPreflight = await json(await fetch(`${environment.runtime.origin}/v1/adapters/hermes/preflight`, {
+    method: "POST",
+    headers: { ...baseHeaders(environment.runtime), "Content-Type": "application/json" },
+    body: "{}",
+  }));
+  assert.equal(hermesPreflight.body.adapter.selectable, false);
+  assert.equal(environment.calls.hermesProbes, 2);
 });
 
 test("Codex personal consent is bearer-bound, in-memory, and required before a run", async (t) => {
@@ -732,6 +824,254 @@ test("Codex personal consent is bearer-bound, in-memory, and required before a r
     probesBeforeCoach,
     "the coach turn must rely on the Runner's one fresh attestation instead of probing twice",
   );
+});
+
+test("Qoder local consent is bearer-bound, in-memory, and required before a run", async (t) => {
+  const environment = await fixture();
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  const before = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  assert.equal(before.body.adapters.find(({ id }) => id === "qoder").state, "consent_required");
+
+  const rejected = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "qoder-before-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "qoder" })),
+  }));
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.body.reason_code, "adapter_not_selectable");
+  assert.equal(environment.calls.qoderRuns.length, 0);
+
+  const badConsent = await json(await fetch(`${environment.runtime.origin}/v1/adapters/qoder/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "qoder-bad-consent",
+    },
+    body: JSON.stringify({ consent_version: "codex-personal-consent.v1", accepted: true }),
+  }));
+  assert.equal(badConsent.status, 400);
+  assert.equal(badConsent.body.reason_code, "invalid_request");
+
+  const consented = await json(await fetch(`${environment.runtime.origin}/v1/adapters/qoder/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "qoder-consent",
+    },
+    body: JSON.stringify({ consent_version: "qoder-local-consent.v1", accepted: true }),
+  }));
+  assert.equal(consented.status, 200);
+  assert.equal(consented.body.adapter.state, "experimental_personal");
+  assert.equal(consented.body.adapter.selectable, true);
+  assert.equal(consented.body.adapter.execution_mode, "personal_experimental");
+  assert.equal(consented.body.adapter.framework_adapter_status, "probe_only");
+  const probesBeforeCoach = environment.calls.qoderProbes;
+
+  const forgedPreference = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "qoder-forged-model-preference",
+    },
+    body: JSON.stringify(submitBody({ engine: "qoder", model_preference: "fast" })),
+  }));
+  assert.equal(forgedPreference.status, 400);
+  assert.equal(forgedPreference.body.reason_code, "invalid_request");
+  assert.equal(environment.calls.qoderPreflights, 0);
+  assert.equal(environment.calls.qoderRuns.length, 0);
+
+  const coaching = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "qoder-after-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "qoder" })),
+  }));
+  assert.equal(coaching.status, 200);
+  assert.equal(coaching.body.coaching_text, "Qoder local coaching.");
+  assert.equal(coaching.body.execution_mode, "personal_experimental");
+  assert.equal(coaching.body.framework_adapter_status, "probe_only");
+  assert.equal(coaching.body.model_preference, null);
+  assert.deepEqual(coaching.body.stages.map(({ id }) => id), ["request_validated", "agent_running", "output_validated"]);
+  assert.equal(environment.calls.qoderPreflights, 1);
+  assert.equal(environment.calls.qoderRuns.length, 1);
+  assert.equal(
+    environment.calls.qoderProbes,
+    probesBeforeCoach,
+    "the coach turn must rely on the Runner's one fresh attestation instead of probing twice",
+  );
+
+  const secondGrant = await bootstrap(environment.runtime);
+  assert.equal(typeof secondGrant.body.access_token, "string");
+  const secondAdapters = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime, secondGrant.body.access_token),
+  }));
+  assert.equal(
+    secondAdapters.body.adapters.find(({ id }) => id === "qoder").state,
+    "consent_required",
+    "consent must not survive a fresh bearer grant",
+  );
+});
+
+test("Hermes local consent is bearer-bound, in-memory, and required before a run", async (t) => {
+  const environment = await fixture();
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+
+  const before = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  assert.equal(before.body.adapters.find(({ id }) => id === "hermes").state, "consent_required");
+
+  const rejected = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "hermes-before-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "hermes" })),
+  }));
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.body.reason_code, "adapter_not_selectable");
+  assert.equal(environment.calls.hermesRuns.length, 0);
+
+  const badConsent = await json(await fetch(`${environment.runtime.origin}/v1/adapters/hermes/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "hermes-bad-consent",
+    },
+    body: JSON.stringify({ consent_version: "qoder-local-consent.v1", accepted: true }),
+  }));
+  assert.equal(badConsent.status, 400);
+  assert.equal(badConsent.body.reason_code, "invalid_request");
+
+  const consented = await json(await fetch(`${environment.runtime.origin}/v1/adapters/hermes/personal-consent`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "hermes-consent",
+    },
+    body: JSON.stringify({ consent_version: "hermes-local-consent.v1", accepted: true }),
+  }));
+  assert.equal(consented.status, 200);
+  assert.equal(consented.body.adapter.state, "experimental_personal");
+  assert.equal(consented.body.adapter.selectable, true);
+  assert.equal(consented.body.adapter.execution_mode, "personal_experimental");
+  assert.equal(consented.body.adapter.framework_adapter_status, "probe_only");
+  const probesBeforeCoach = environment.calls.hermesProbes;
+
+  const forgedModelPreference = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "hermes-forged-model-preference",
+    },
+    body: JSON.stringify(submitBody({ engine: "hermes", model_preference: "fast" })),
+  }));
+  assert.equal(forgedModelPreference.status, 400);
+  assert.equal(forgedModelPreference.body.reason_code, "invalid_request");
+  assert.equal(environment.calls.hermesPreflights, 0);
+  assert.equal(environment.calls.hermesRuns.length, 0);
+
+  const coaching = await json(await fetch(`${environment.runtime.origin}/v1/coach`, {
+    method: "POST",
+    headers: {
+      ...baseHeaders(environment.runtime),
+      "Content-Type": "application/json",
+      "Idempotency-Key": "hermes-after-consent",
+    },
+    body: JSON.stringify(submitBody({ engine: "hermes" })),
+  }));
+  assert.equal(coaching.status, 200);
+  assert.equal(coaching.body.coaching_text, "Hermes local coaching.");
+  assert.equal(coaching.body.execution_mode, "personal_experimental");
+  assert.equal(coaching.body.framework_adapter_status, "probe_only");
+  assert.equal(coaching.body.model_preference, null);
+  assert.deepEqual(coaching.body.stages.map(({ id }) => id), ["request_validated", "agent_running", "output_validated"]);
+  assert.equal(environment.calls.hermesPreflights, 1);
+  assert.equal(environment.calls.hermesRuns.length, 1);
+  assert.equal(
+    environment.calls.hermesProbes,
+    probesBeforeCoach,
+    "the coach turn must rely on the Runner's one fresh attestation instead of probing twice",
+  );
+
+  const secondGrant = await bootstrap(environment.runtime);
+  assert.equal(typeof secondGrant.body.access_token, "string");
+  const secondAdapters = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime, secondGrant.body.access_token),
+  }));
+  assert.equal(
+    secondAdapters.body.adapters.find(({ id }) => id === "hermes").state,
+    "consent_required",
+    "consent must not survive a fresh bearer grant",
+  );
+});
+
+test("Hermes local probe failures map to needs_login and unavailable states", async (t) => {
+  const environment = await fixture({
+    hermesLocalProbe: async () => ({
+      mode: "hermes-local-experimental",
+      engine: "hermes",
+      status: "needs_login",
+      available: false,
+      selectable: false,
+      qualified_adapter: false,
+      reason_codes: ["digital_employee_adapter_unqualified", "hermes_login_required"],
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+  const response = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  const hermes = response.body.adapters.find(({ id }) => id === "hermes");
+  assert.equal(hermes.state, "needs_login");
+  assert.equal(hermes.selectable, false);
+  assert.equal(hermes.host_status, "not_ready");
+  assert.deepEqual(hermes.reason_codes, ["hermes_local_mode_unqualified", "hermes_login_required"]);
+});
+
+test("Qoder local probe failures map to needs_login and unavailable states", async (t) => {
+  const environment = await fixture({
+    qoderLocalProbe: async () => ({
+      mode: "qoder-local-experimental",
+      engine: "qoder",
+      status: "needs_login",
+      available: false,
+      selectable: false,
+      qualified_adapter: false,
+      reason_codes: ["digital_employee_adapter_unqualified", "qoder_login_required"],
+    }),
+  });
+  t.after(() => environment.close());
+  await bootstrap(environment.runtime);
+  const response = await json(await fetch(`${environment.runtime.origin}/v1/adapters`, {
+    headers: baseHeaders(environment.runtime),
+  }));
+  const qoder = response.body.adapters.find(({ id }) => id === "qoder");
+  assert.equal(qoder.state, "needs_login");
+  assert.equal(qoder.selectable, false);
+  assert.equal(qoder.host_status, "not_ready");
+  assert.deepEqual(qoder.reason_codes, ["qoder_local_mode_unqualified", "qoder_login_required"]);
 });
 
 test("Codex stays unselectable when no exact model profile is attested", async (t) => {

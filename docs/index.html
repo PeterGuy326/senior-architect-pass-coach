@@ -227,7 +227,7 @@
         <button class="dialog-close" id="engine-dialog-close" type="button" aria-label="关闭引擎选择">×</button>
       </div>
       <p class="engine-dialog__intro" id="runtime-context">
-        直接点击想用的 Agent。页面会在这次点击内唤起并连接 Runtime，验证它与私教员工包兼容后自动进入对话。Agent 只是可替换的大脑；题库、可信判分、行为信号和学习档案始终由浏览器 Harness 掌管。
+        直接点击想用的 Agent。页面会在这次点击内唤起并连接 Runtime，验证它与私教员工包兼容后自动进入对话。Agent 只是可替换的大脑；题库、可信判分、行为信号和学习档案始终由浏览器 Harness 掌管。不装任何 Agent 也能完整学习——出题、判分、进度都在浏览器完成，Agent 只是可选的 AI 讲解。
       </p>
       <div class="runtime-callout" id="runtime-callout">
         <p id="runtime-callout-copy">这是公开网页。点击后先检测已运行的 Runtime；macOS 未运行时可唤起已安装应用，Linux 请先运行 start-local-coach。确认服务就绪后才打开 127.0.0.1 配对页，页面加载时不会扫描端口。</p>
@@ -240,6 +240,22 @@
         <button class="secondary-action" id="runtime-connect" type="button">检测全部本机 Agent</button>
       </div>
       <div class="engine-list" id="engine-list" aria-label="讲解引擎状态与选择"></div>
+      <section class="engine-help-panel" id="engine-help-panel" aria-labelledby="engine-help-title" hidden>
+        <div class="engine-help-panel__heading">
+          <div>
+            <p class="folio">本机安装引导</p>
+            <h3 id="engine-help-title">启用 Hermes Agent</h3>
+          </div>
+          <button class="dialog-close" id="engine-help-close" type="button" aria-label="收起安装引导">×</button>
+        </div>
+        <p id="engine-help-copy"></p>
+        <pre class="engine-help-panel__command" id="engine-help-command" hidden></pre>
+        <div class="engine-help-panel__actions">
+          <a class="source-link" id="engine-help-link" target="_blank" rel="noreferrer">打开官方安装说明 <span aria-hidden="true">↗</span></a>
+          <button class="secondary-action" id="engine-help-retest" type="button">装好 / 登录好了，重新检测</button>
+        </div>
+        <p class="engine-help-panel__foot" id="engine-help-status" role="status"></p>
+      </section>
       <section class="model-profile-panel" id="model-profile-panel" aria-labelledby="model-profile-title" hidden>
         <div class="model-profile-panel__heading">
           <div>

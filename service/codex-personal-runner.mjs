@@ -62,7 +62,7 @@ const ALLOWED_EVENT_TYPES = new Set([
 ]);
 const CODEX_0147_CODE_MODE_DIAGNOSTIC = "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.";
 const CODEX_0147_MODEL_REFRESH_DIAGNOSTIC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit$/u;
-const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
+export const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
 const PLAN_FOCUS_VALUES = Object.freeze([
   "concept_boundary",
   "failure_mode_mapping",
@@ -582,7 +582,7 @@ function exactObject(value, label) {
   return value;
 }
 
-function trustedGradeFrom(input) {
+export function trustedGradeFrom(input) {
   const materials = input.request?.approved_materials;
   if (!Array.isArray(materials)) {
     throw runnerError("CODEX_PERSONAL_TRUSTED_GRADE_MISSING", "提交结果缺少可信本地判定。 ");
@@ -859,7 +859,7 @@ export function parseCodexJsonl(stdout, { action = "review", version } = {}) {
   return action === "submit" ? parseCoachingPlan(value) : parseCoachingText(value);
 }
 
-function renderSubmitPlan(input, plan) {
+export function renderSubmitPlan(input, plan) {
   const grade = trustedGradeFrom(input);
   const focusLabels = Object.freeze({
     concept_boundary: "重画概念边界",
@@ -892,7 +892,7 @@ function sourceRefsFor(input, grade) {
   return [];
 }
 
-function employeeOutputFromTrustedInput(input, coachingText) {
+export function employeeOutputFromTrustedInput(input, coachingText) {
   const action = input.action;
   const isSubmit = action === "submit";
   const grade = isSubmit ? trustedGradeFrom(input) : null;

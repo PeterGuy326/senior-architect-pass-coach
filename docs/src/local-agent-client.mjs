@@ -682,6 +682,75 @@ export class LocalAgentClient {
     return adapter;
   }
 
+  async consentQoderLocal() {
+    this.#assertConnected();
+    const result = await this.#request("/v1/adapters/qoder/personal-consent", {
+      method: "POST",
+      body: {
+        consent_version: "qoder-local-consent.v1",
+        accepted: true,
+      },
+      authenticated: true,
+    });
+    if (result.protocol !== LOOPBACK_PROTOCOL) {
+      throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
+    }
+    const adapter = safeAdapter(result.adapter);
+    if (
+      adapter.id !== "qoder"
+      || adapter.state !== "experimental_personal"
+      || adapter.selectable !== true
+      || adapter.execution_mode !== "personal_experimental"
+      || adapter.framework_adapter_status !== "probe_only"
+    ) {
+      throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了无效的 Qoder 本机模式状态。");
+    }
+    return adapter;
+  }
+
+  async consentHermesLocal() {
+    this.#assertConnected();
+    const result = await this.#request("/v1/adapters/hermes/personal-consent", {
+      method: "POST",
+      body: {
+        consent_version: "hermes-local-consent.v1",
+        accepted: true,
+      },
+      authenticated: true,
+    });
+    if (result.protocol !== LOOPBACK_PROTOCOL) {
+      throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
+    }
+    const adapter = safeAdapter(result.adapter);
+    if (
+      adapter.id !== "hermes"
+      || adapter.state !== "experimental_personal"
+      || adapter.selectable !== true
+      || adapter.execution_mode !== "personal_experimental"
+      || adapter.framework_adapter_status !== "probe_only"
+    ) {
+      throw clientError("INVALID_ADAPTER_RESPONSE", "Runtime 返回了无效的 Hermes 本机模式状态。");
+    }
+    return adapter;
+  }
+
+  async preflight(engine) {
+    this.#assertConnected();
+    const engineId = cleanText(engine, 64);
+    if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(engineId) || engineId === "content-only") {
+      throw clientError("INVALID_ENGINE", "请选择 Runtime 报告可用的 Agent 引擎。");
+    }
+    const result = await this.#request(`/v1/adapters/${engineId}/preflight`, {
+      method: "POST",
+      body: {},
+      authenticated: true,
+    });
+    if (result.protocol !== LOOPBACK_PROTOCOL) {
+      throw clientError("PROTOCOL_MISMATCH", "本机 Runtime 与网页协议版本不一致。");
+    }
+    return safeAdapter(result.adapter);
+  }
+
   async coach({ phase, engine, modelPreference = null, message = "", publicQuestion = null, trustedGrade = null, deidentifiedProgress } = {}) {
     this.#assertConnected();
     if (!["submission", "chat"].includes(phase)) {
