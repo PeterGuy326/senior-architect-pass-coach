@@ -60,6 +60,8 @@ const ALLOWED_EVENT_TYPES = new Set([
   "turn.failed",
   "error",
 ]);
+const CODEX_0147_CODE_MODE_DIAGNOSTIC = "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.";
+const CODEX_0147_MODEL_REFRESH_DIAGNOSTIC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit$/u;
 export const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
 const PLAN_FOCUS_VALUES = Object.freeze([
   "concept_boundary",
@@ -750,11 +752,42 @@ export function assertCodexCoachingText(text) {
   return text;
 }
 
+function isKnownPreTurnDiagnostic(event, { phase, version }) {
+  const item = event?.item;
+  return version === "0.147.0"
+    && phase === "thread"
+    && event.type === "item.completed"
+    && item
+    && typeof item === "object"
+    && !Array.isArray(item)
+    && typeof item.id === "string"
+    && item.id.length > 0
+    && item.type === "error"
+    && item.message === CODEX_0147_CODE_MODE_DIAGNOSTIC
+    && Object.keys(item).sort().join(",") === "id,message,type";
+}
+
+function assertExpectedStderr(stderr, { version }) {
+  if (typeof stderr !== "string") {
+    throw runnerError("CODEX_PERSONAL_UNEXPECTED_STDERR", "Codex 返回了未预期的诊断输出；本轮已拒绝。 ");
+  }
+  const lines = stderr.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return;
+  if (
+    version === "0.147.0"
+    && lines.length === 1
+    && CODEX_0147_MODEL_REFRESH_DIAGNOSTIC.test(lines[0])
+  ) return;
+  throw runnerError("CODEX_PERSONAL_UNEXPECTED_STDERR", "Codex 返回了未预期的诊断输出；本轮已拒绝。 ");
+}
+
 /**
- * Strictly accept one no-tool Codex turn. Lifecycle errors are recognized but
- * still fail; every unknown top-level event or item type is rejected.
+ * Strictly accept one no-tool Codex turn. The audited 0.147 CLI emits one
+ * fixed, fail-closed Code Mode diagnostic before turn.started when its host is
+ * deliberately disabled; only that exact pre-turn item is ignored. Lifecycle
+ * errors and every other unknown top-level event or item type still fail.
  */
-export function parseCodexJsonl(stdout, { action = "review" } = {}) {
+export function parseCodexJsonl(stdout, { action = "review", version } = {}) {
   if (!PERSONAL_ACTIONS.has(action)) {
     throw runnerError("CODEX_PERSONAL_ACTION_UNSUPPORTED", "Codex 个人实验模式动作无效。 ");
   }
@@ -804,6 +837,7 @@ export function parseCodexJsonl(stdout, { action = "review" } = {}) {
       phase = "completed";
       continue;
     }
+    if (isKnownPreTurnDiagnostic(event, { phase, version })) continue;
     if (phase !== "turn") {
       throw runnerError("CODEX_PERSONAL_JSONL_INVALID", "Codex 项目事件顺序无效。 ");
     }
@@ -1110,7 +1144,7 @@ export class CodexPersonalRunner {
         "Codex 个人实验模式只接受提交后讲解或无题面复习追问。",
       );
     }
-    await this.preflight({ signal });
+    const preflight = await this.preflight({ signal });
     const prompt = teachingPrompt(input, this.maxPromptBytes);
     const outputSchema = input.action === "submit"
       ? SUBMIT_COACHING_PLAN_SCHEMA
@@ -1150,10 +1184,11 @@ export class CodexPersonalRunner {
           terminated_by_signal: Boolean(result?.signal),
         });
       }
-      if (typeof result.stderr !== "string" || result.stderr.trim().length > 0) {
-        throw runnerError("CODEX_PERSONAL_UNEXPECTED_STDERR", "Codex 返回了未预期的诊断输出；本轮已拒绝。 ");
-      }
-      const modelOutput = parseCodexJsonl(result.stdout, { action: input.action });
+      assertExpectedStderr(result.stderr, { version: preflight.version });
+      const modelOutput = parseCodexJsonl(result.stdout, {
+        action: input.action,
+        version: preflight.version,
+      });
       const coachingText = input.action === "submit"
         ? renderSubmitPlan(input, modelOutput)
         : assertCodexCoachingText(modelOutput);
