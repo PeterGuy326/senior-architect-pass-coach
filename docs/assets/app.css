@@ -1449,6 +1449,68 @@ textarea[disabled] {
   gap: 0.5rem;
 }
 
+.engine-help-panel {
+  padding: 0.9rem 1rem 1rem;
+  margin: 0 1.5rem 1rem;
+  background: #e8e4d8;
+  border: 1px solid #c5b690;
+  box-shadow: inset 3px 0 0 var(--cinnabar);
+}
+
+.engine-help-panel__heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  margin-bottom: 0.6rem;
+}
+
+.engine-help-panel__heading h3,
+.engine-help-panel__heading p {
+  margin: 0;
+}
+
+.engine-help-panel__heading h3 {
+  font-family: var(--font-editorial);
+  font-size: 1rem;
+}
+
+.engine-help-panel__heading .folio {
+  margin-bottom: 0.15rem;
+}
+
+.engine-help-panel__heading .dialog-close {
+  margin-top: 0.15rem;
+}
+
+.engine-help-panel__command {
+  padding: 0.6rem 0.75rem;
+  margin: 0.6rem 0;
+  overflow-x: auto;
+  color: #2c3342;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f6f1e2;
+  border: 1px solid #c5b690;
+  user-select: text;
+}
+
+.engine-help-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.engine-help-panel__foot {
+  margin: 0.55rem 0 0;
+  color: #59647a;
+  font-size: 0.74rem;
+}
+
 .model-profile-card {
   display: grid;
   gap: 0.18rem;
