@@ -386,7 +386,20 @@ test("runner strips markdown fences and rejects malformed model text", async () 
 
 test("answer assertions reject any restatement of the answer in model text", () => {
   assert.equal(assertHermesCoachingText("先按故障树逐层排查。"), "先按故障树逐层排查。");
-  for (const text of ["正确答案是 B", "这道题应该选 A", "解析：", "排除 C", "选项 D 更合适", "The answer is B"]) {
+  assert.equal(
+    assertHermesCoachingText("按错误检测、错误恢复、错误预防整理战术，再把正确率反馈给我。"),
+    "按错误检测、错误恢复、错误预防整理战术，再把正确率反馈给我。",
+  );
+  for (const text of [
+    "正确答案是 B",
+    "这道题应该选 A",
+    "解析：",
+    "排除 C",
+    "选项 D 更合适",
+    "The answer is B",
+    "错误选项是 D",
+    "这个选择是错误的",
+  ]) {
     assert.throws(() => assertHermesCoachingText(text), (error) => error?.code === "HERMES_LOCAL_ANSWER_ASSERTION_REJECTED");
   }
 });

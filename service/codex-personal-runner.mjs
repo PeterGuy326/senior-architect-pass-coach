@@ -14,7 +14,7 @@ import { CoachError } from "./errors.mjs";
 import { validateEmployeeInput, validateEmployeeOutput } from "./schema-validator.mjs";
 
 export const CODEX_PERSONAL_MODE = "codex-personal-experimental";
-export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0", "0.147.0"]);
+export const CODEX_PERSONAL_AUDITED_VERSIONS = Object.freeze(["0.146.0", "0.147.0", "0.148.0"]);
 export const CODEX_MODEL_PREFERENCE_DEFINITIONS = Object.freeze([
   Object.freeze({ id: "lite", label: "轻量", model: "gpt-5.4-mini", reasoning_effort: "low" }),
   Object.freeze({ id: "fast", label: "快速", model: "gpt-5.6-luna", reasoning_effort: "low" }),
@@ -62,7 +62,8 @@ const ALLOWED_EVENT_TYPES = new Set([
 ]);
 const CODEX_0147_CODE_MODE_DIAGNOSTIC = "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`.";
 const CODEX_0147_MODEL_REFRESH_DIAGNOSTIC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit$/u;
-export const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确|错误|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
+const CODEX_CODE_MODE_DIAGNOSTIC_VERSIONS = new Set(["0.147.0", "0.148.0"]);
+export const COACHING_ANSWER_ASSERTION = /(?:答案|解析|正确(?!率)|错误(?!检测|恢复|预防|容忍|处理)|答对|答错|选项|应(?:该)?选|请选择|(?:选择|排除|倾向)\s*[A-H](?:\s*项)?|[A-H]\s*(?:项|选项)?\s*(?:才是|才|更|最)?\s*(?:合适|合理|符合|优先|可选)|\b(?:correct|incorrect|wrong)\s+(?:answer|option|choice)\b|\b(?:answer|option|choice)\s*(?:is|:)?\s*[A-H]\b|\b[A-H]\s+(?:is\s+)?(?:correct|wrong|best)\b)/iu;
 const PLAN_FOCUS_VALUES = Object.freeze([
   "concept_boundary",
   "failure_mode_mapping",
@@ -754,7 +755,7 @@ export function assertCodexCoachingText(text) {
 
 function isKnownPreTurnDiagnostic(event, { phase, version }) {
   const item = event?.item;
-  return version === "0.147.0"
+  return CODEX_CODE_MODE_DIAGNOSTIC_VERSIONS.has(version)
     && phase === "thread"
     && event.type === "item.completed"
     && item
@@ -774,7 +775,7 @@ function assertExpectedStderr(stderr, { version }) {
   const lines = stderr.split(/\r?\n/u).filter((line) => line.trim().length > 0);
   if (lines.length === 0) return;
   if (
-    version === "0.147.0"
+    CODEX_CODE_MODE_DIAGNOSTIC_VERSIONS.has(version)
     && lines.length === 1
     && CODEX_0147_MODEL_REFRESH_DIAGNOSTIC.test(lines[0])
   ) return;
@@ -782,9 +783,9 @@ function assertExpectedStderr(stderr, { version }) {
 }
 
 /**
- * Strictly accept one no-tool Codex turn. The audited 0.147 CLI emits one
- * fixed, fail-closed Code Mode diagnostic before turn.started when its host is
- * deliberately disabled; only that exact pre-turn item is ignored. Lifecycle
+ * Strictly accept one no-tool Codex turn. The audited 0.147/0.148 CLIs emit
+ * one fixed, fail-closed Code Mode diagnostic before turn.started when their
+ * host is deliberately disabled; only that exact pre-turn item is ignored. Lifecycle
  * errors and every other unknown top-level event or item type still fail.
  */
 export function parseCodexJsonl(stdout, { action = "review", version } = {}) {

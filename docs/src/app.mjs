@@ -197,7 +197,7 @@ const ADAPTER_REASON_LABELS = Object.freeze({
   codex_login_required: "请先在本机 Codex CLI 登录 ChatGPT",
   codex_executable_not_found: "本机未发现 Codex CLI",
   codex_version_probe_failed: "Codex CLI 版本检测失败",
-  codex_version_not_audited: "当前只开放已审计的 Codex CLI 0.146.0 / 0.147.0",
+  codex_version_not_audited: "当前只开放已审计的 Codex CLI 0.146.0 / 0.147.0 / 0.148.0",
   codex_auth_file_missing: "未找到可供本机个人模式复用的 Codex 登录",
   codex_auth_file_unsafe: "Codex 登录文件类型或权限不符合安全要求",
   codex_command_surface_unsupported: "Codex CLI 命令面与已审计版本不一致",

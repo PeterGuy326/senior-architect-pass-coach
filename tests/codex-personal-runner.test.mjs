@@ -232,7 +232,7 @@ test("probe reports only an audited saved-login personal mode without claiming a
   assert.equal(result.qualified_adapter, false);
   assert.equal(result.adapter_status, "experimental_personal");
   assert.ok(result.reason_codes.includes("digital_employee_adapter_unqualified"));
-  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0", "0.147.0"]);
+  assert.deepEqual(CODEX_PERSONAL_AUDITED_VERSIONS, ["0.146.0", "0.147.0", "0.148.0"]);
   assert.deepEqual(calls.map((call) => call.args), [["--version"], ["exec", "--help"], ["debug", "models"], ["login", "status"]]);
   assert.deepEqual(result.model_preferences.map(({ id }) => id), ["lite", "fast", "balanced", "deep"]);
   assert.equal(result.default_model_preference, "fast");
@@ -275,7 +275,7 @@ test("probe rejects unaudited versions, unsafe auth, and missing command flags",
   const unaudited = await probeCodexPersonalMode({
     userCodexHome: root,
     authFile,
-    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.148.0", stderr: "" }),
+    processRunner: async () => ({ exitCode: 0, stdout: "codex-cli 0.149.0", stderr: "" }),
   });
   assert.equal(unaudited.status, "incompatible");
   assert.ok(unaudited.reason_codes.includes("codex_version_not_audited"));
@@ -586,6 +586,30 @@ test("Codex 0.147 stderr allowlist rejects near-matches and additional diagnosti
   await assert.rejects(
     runner(diagnostic.replace("timeout", "connection reset")).run(reviewInput()),
     (error) => error.code === "CODEX_PERSONAL_UNEXPECTED_STDERR",
+  );
+});
+
+test("audited Codex 0.148 keeps the exact fail-closed diagnostic before turn.started", async (t) => {
+  const { authFile } = await authFixture(t);
+  const runner = new CodexPersonalRunner({
+    authFile,
+    modelPreference: "lite",
+    processRunner: async () => ({
+      exitCode: 0,
+      signal: null,
+      stdout: codex0147Jsonl(),
+      stderr: "",
+    }),
+    probe: async () => ({ ...readyProbe(), version: "0.148.0" }),
+    personalAuthConsent: true,
+  });
+
+  const output = await runner.run(reviewInput());
+  assert.equal(output.teaching_result.summary, "先复盘可用性故障模式，再做一道异题复测。");
+
+  assert.throws(
+    () => parseCodexJsonl(codex0147Jsonl(), { version: "0.149.0" }),
+    CoachErrorLike,
   );
 });
 
