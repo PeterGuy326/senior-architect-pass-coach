@@ -43,9 +43,9 @@ Runtime 不会把 Agent CLI 一起打包，也不会从网页收集 API Key。Di
 | Claude Code | 有执行 Adapter；还需兼容版本、`ANTHROPIC_API_KEY` 与员工包级 preflight 通过 |
 | Qwen Code | 有执行 Adapter；还需 `0.17.1`、`OPENAI_API_KEY`、`OPENAI_MODEL` 与 preflight 通过 |
 | CodeBuddy | 有执行 Adapter；还需 `2.106.4`、`CODEBUDDY_API_KEY`、`CODEBUDDY_MODEL` 与 preflight 通过 |
-| Qoder | 不可选择；当前 Adapter 缺少本员工包要求的 `structured_output` 能力 |
-| Codex | Digital Employee `0.3.0` 仍是 probe-only；当前仅开放已审计的 Codex CLI `0.146.0`，且 `codex login status` 有效时，可经当前 Bearer 下的二次同意启用“个人实验模式” |
-| Hermes Agent（Nous Research） | 不可选择；当前只以 `hermes --version` 探测安装状态，执行 Adapter 尚未实现 |
+| Qoder | 个人实验模式：本机 `qodercli` 已登录并经页面明确同意后，可被选为讲解引擎；复用本机登录态，不是 Digital Employee 合格 Adapter |
+| Codex | Digital Employee `0.3.0` 仍是 probe-only；当前仅开放已审计的 Codex CLI `0.146.0` / `0.147.0` / `0.148.0`，且 `codex login status` 有效时，可经当前 Bearer 下的二次同意启用“个人实验模式” |
+| Hermes Agent（Nous Research） | 个人实验模式：本机 `hermes` 已登录并经页面明确同意后，可被选为讲解引擎；复用本机登录态，不是 Digital Employee 合格 Adapter |
 
 预览版只读取启动环境，不提供网页密钥表单。不要把 Key 放进 URL、聊天内容、仓库文件或命令参数；请使用自己信任的本机凭证管理方式先建立 Runtime 的环境，再启动应用。后续正式安装器应接入操作系统 Keychain/Credential Manager。
 

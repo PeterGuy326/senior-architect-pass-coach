@@ -107,7 +107,7 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v17/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v18/u);
   assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/harness-action-router\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/dialog-interaction\.mjs/u);
