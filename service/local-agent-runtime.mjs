@@ -1335,7 +1335,7 @@ export class LocalAgentRuntime {
       ? "GET"
       : (
           /^\/v1\/adapters\/[A-Za-z0-9-]+\/preflight$/u.test(pathname)
-          || pathname === "/v1/adapters/codex/personal-consent"
+          || /^\/v1\/adapters\/(codex|qoder|hermes)\/personal-consent$/u.test(pathname)
           || pathname === "/v1/coach"
         )
         ? "POST"
