@@ -110,6 +110,11 @@ test("Pages exposes a mandatory Local Agent gate and no browser tutor card", asy
   assert.match(chatView, /role === "coach"[\s\S]*label: "本机 Agent"/u);
   assert.match(chatView, /label: "本地 Harness"/u);
   assert.match(chatView, /appendMessage\("harness"/u);
-  assert.match(serviceWorker, /architect-pass-coach-pages-v19/u);
+  assert.match(chatView, /process-ledger__path/u);
+  assert.match(chatView, /setAttribute\("aria-expanded"/u);
+  assert.match(chatView, /本步用时/u);
+  assert.match(chatView, /点击任一节点可展开或收起该步的执行细节/u);
+  assert.match(chatView, /仅展示可验证的执行节点，不展示模型内部思维链。/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v20/u);
   assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
 });
