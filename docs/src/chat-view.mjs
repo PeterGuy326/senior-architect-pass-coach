@@ -385,7 +385,7 @@ export function createChatView({
     elapsedNode.setAttribute("aria-hidden", "true");
     heading.append(titleNode, elapsedNode);
     const engineNode = engine ? node("p", "process-ledger__engine", engine) : null;
-    const list = node("ol", "process-ledger__stages process-ledger__path");
+    const list = node("ol", "process-ledger__stages");
     const stageRows = normalizedStages.map((stage, index) => {
       const row = node("li", "process-stage");
       row.dataset.state = index === 0 ? "active" : "pending";
