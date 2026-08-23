@@ -20,7 +20,7 @@ import {
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 const ANSWER_LABELS = /^[A-H]+$/u;
 const BUSY_STATES = new Set(["loading", "generating_question", "evaluating"]);
-const DIRECT_CONNECT_AGENT_IDS = new Set(["claude-code", "codex", "qwen-code", "codebuddy"]);
+const DIRECT_CONNECT_AGENT_IDS = new Set(["codex", "qoder"]);
 const RUNTIME_CONNECTION_STAGE_MESSAGES = Object.freeze({
   checking: "正在检查已运行的本机 Runtime；此操作由你刚才的点击触发……",
   launching: "尚未发现 Runtime，正在尝试唤起 macOS 应用；Linux 请先运行 start-local-coach……",
@@ -127,48 +127,25 @@ const LOOPBACK_RUNTIME_PAGE = isLocalAgentRuntimeOrigin(location.origin);
 const PUBLIC_COACH_PAGE = location.origin === PUBLIC_COACH_ORIGIN;
 const STATIC_AGENT_CATALOG = Object.freeze([
   Object.freeze({
-    id: "claude-code",
-    label: "Claude Code",
-    state: "framework_supported",
-    selectable: false,
-    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和员工契约。",
-  }),
-  Object.freeze({
-    id: "qoder",
-    label: "Qoder CLI",
-    state: "package_incompatible",
-    selectable: false,
-    detail: "本私教要求 structured_output；当前 Qoder Adapter 不满足，连接也不会冒充可用。",
-  }),
-  Object.freeze({
     id: "codex",
     label: "Codex CLI",
     state: "probe_only",
     selectable: false,
-    detail: "Digital Employee 0.3.0 仍仅探测；连接后可明确同意使用本机个人实验模式。",
+    detail: "点击接入后探测本机 Codex CLI；明确同意复用你已登录的账号，启用个人实验模式（已审计 0.146.0 / 0.147.0 / 0.148.0）。",
   }),
   Object.freeze({
-    id: "qwen-code",
-    label: "Qwen Code",
-    state: "framework_supported",
-    selectable: false,
-    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和模型配置。",
-  }),
-  Object.freeze({
-    id: "codebuddy",
-    label: "CodeBuddy Code",
-    state: "framework_supported",
-    selectable: false,
-    detail: "Digital Employee 支持运行；连接后才检测本机版本、服务凭据和模型配置。",
-  }),
-  Object.freeze({
-    id: "hermes",
-    label: "Hermes Agent (Nous Research)",
+    id: "qoder",
+    label: "Qoder CLI",
     state: "probe_only",
     selectable: false,
-    detail: "可以探测本机安装；连接后可明确同意使用本机个人实验模式。",
+    detail: "点击接入后探测本机 qodercli；明确同意复用你已登录的账号，启用个人实验模式。",
   }),
 ]);
+const ENGINE_ICONS = Object.freeze({
+  codex: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#101010\"/><path d=\"M16 7.8l7 4.1v8.2l-7 4.1-7-4.1v-8.2z\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.9\" stroke-linejoin=\"round\"/><path d=\"M16 16l7-4.1M16 16l-7-4.1M16 16v8.2\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/></svg>",
+  qoder: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#0ba85c\"/><circle cx=\"15.2\" cy=\"15.2\" r=\"6.2\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.6\"/><path d=\"M19.6 19.6l4.4 4.4\" stroke=\"#ffffff\" stroke-width=\"2.6\" stroke-linecap=\"round\"/></svg>",
+  fallback: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#5f6470\"/><path d=\"M10.5 11.5l5 4.5-5 4.5\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M17.5 21h5\" stroke=\"#ffffff\" stroke-width=\"2.4\" stroke-linecap=\"round\"/></svg>",
+});
 const ADAPTER_STATE_LABELS = Object.freeze({
   runtime_required: "本机尚未检测",
   framework_supported: "框架支持运行",
@@ -611,6 +588,10 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
   button.setAttribute("aria-pressed", id === selectedEngine ? "true" : "false");
   button.disabled = operating || connectingRuntime || !actionable;
 
+  const icon = document.createElement("span");
+  icon.className = "engine-card__icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = ENGINE_ICONS[id] || ENGINE_ICONS.fallback;
   const title = document.createElement("span");
   title.className = "engine-card__title";
   title.textContent = label;
@@ -625,7 +606,7 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
   copy.className = "engine-card__detail";
   const reasonCopy = reasons.map((reason) => ADAPTER_REASON_LABELS[reason] || "需要在本机 Runtime 查看诊断");
   copy.textContent = [detail, ...new Set(reasonCopy)].filter(Boolean).join(" · ").slice(0, 720) || "状态由本机 Runtime 报告。";
-  button.append(title, status, copy);
+  button.append(icon, title, status, copy);
   button.addEventListener("click", () => {
     if (helpEngine) {
       openEngineHelp(helpEngine);
@@ -640,7 +621,7 @@ function createEngineCard({ id, label, state, detail, reasons = [], selectable =
 
 function renderEngineList() {
   const visibleAdapters = localAgentClient?.connected
-    ? runtimeAdapters
+    ? runtimeAdapters.filter((adapter) => DIRECT_CONNECT_AGENT_IDS.has(adapter.id))
     : STATIC_AGENT_CATALOG;
   const cards = visibleAdapters.map((adapter) => createEngineCard(adapter));
   elements.engineList.replaceChildren(...cards);

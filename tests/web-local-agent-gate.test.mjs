@@ -110,6 +110,6 @@ test("Pages exposes a mandatory Local Agent gate and no browser tutor card", asy
   assert.match(chatView, /role === "coach"[\s\S]*label: "本机 Agent"/u);
   assert.match(chatView, /label: "本地 Harness"/u);
   assert.match(chatView, /appendMessage\("harness"/u);
-  assert.match(serviceWorker, /architect-pass-coach-pages-v18/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v19/u);
   assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
 });

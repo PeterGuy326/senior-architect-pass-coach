@@ -40,7 +40,7 @@ async function loadServiceWorker({
   return listeners;
 }
 
-test("Service Worker v18 precaches the mandatory Local Agent gate module", async () => {
+test("Service Worker v19 precaches the mandatory Local Agent gate module", async () => {
   const opened = [];
   let coreAssets = [];
   const listeners = await loadServiceWorker({
@@ -53,7 +53,7 @@ test("Service Worker v18 precaches the mandatory Local Agent gate module", async
   });
   await Promise.all(lifetime);
 
-  assert.deepEqual(opened, ["architect-pass-coach-pages-v18"]);
+  assert.deepEqual(opened, ["architect-pass-coach-pages-v19"]);
   assert.equal(coreAssets.filter((asset) => asset === "./src/local-agent-gate.mjs").length, 1);
   assert.ok(coreAssets.includes("./src/app.mjs"));
   assert.ok(coreAssets.includes("./index.html"));
@@ -63,8 +63,8 @@ test("Service Worker activation deletes only older caches owned by this Page", a
   const deleted = [];
   const listeners = await loadServiceWorker({
     cacheNames: [
+      "architect-pass-coach-pages-v19",
       "architect-pass-coach-pages-v18",
-      "architect-pass-coach-pages-v17",
       "other-github-pages-project-v9",
     ],
     onCacheDelete: (name) => deleted.push(name),
@@ -75,7 +75,7 @@ test("Service Worker activation deletes only older caches owned by this Page", a
   });
   await Promise.all(lifetime);
 
-  assert.deepEqual(deleted, ["architect-pass-coach-pages-v17"]);
+  assert.deepEqual(deleted, ["architect-pass-coach-pages-v18"]);
 });
 
 function dispatchFetch(listener, request) {

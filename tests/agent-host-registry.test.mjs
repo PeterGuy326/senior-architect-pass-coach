@@ -19,7 +19,7 @@ test("the coach catalog declares six engines including a truthful Hermes entry",
   );
 });
 
-test("the disconnected Pages catalog stays in exact ID parity with the Runtime catalog", async () => {
+test("the disconnected Pages catalog presents only Codex and Qoder as a subset of the Runtime catalog", async () => {
   const source = await readFile(new URL("../docs/src/app.mjs", import.meta.url), "utf8");
   const actionRouter = await readFile(new URL("../docs/src/harness-action-router.mjs", import.meta.url), "utf8");
   const catalogSource = source.slice(
@@ -28,10 +28,11 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   );
   const webIds = [...catalogSource.matchAll(/\bid:\s*"([a-z0-9._-]+)"/gu)]
     .map((match) => match[1]);
-  assert.deepEqual(webIds, COACH_ENGINE_CATALOG.map(({ id }) => id));
-  assert.match(catalogSource, /Hermes Agent \(Nous Research\)/u);
-  assert.equal((catalogSource.match(/state:\s*"framework_supported"/gu) || []).length, 3);
-  assert.equal((catalogSource.match(/state:\s*"package_incompatible"/gu) || []).length, 1);
+  assert.deepEqual(webIds, ["codex", "qoder"]);
+  for (const id of webIds) {
+    assert.ok(COACH_ENGINE_CATALOG.some((entry) => entry.id === id));
+  }
+  assert.doesNotMatch(catalogSource, /state:\s*"framework_supported"|state:\s*"package_incompatible"|本私教不兼容/u);
   assert.equal((catalogSource.match(/state:\s*"probe_only"/gu) || []).length, 2);
   assert.doesNotMatch(catalogSource, /state:\s*"ready"|等待连接本机|本机已安装/u);
   assert.match(source, /Runtime 已连接 · 选择 Agent/u);
@@ -41,7 +42,7 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   assert.match(source, /Codex CLI 个人实验模式/u);
   assert.match(source, /consentCodexPersonal/u);
   assert.match(source, /个人实验模式尚未通过 Digital Employee 工具白名单认证/u);
-  assert.match(source, /DIRECT_CONNECT_AGENT_IDS\s*=\s*new Set\(\["claude-code", "codex", "qwen-code", "codebuddy"\]\)/u);
+  assert.match(source, /DIRECT_CONNECT_AGENT_IDS\s*=\s*new Set\(\["codex", "qoder"\]\)/u);
   assert.match(source, /return connectRuntime\(\{ preferredEngine: engine \}\)/u);
   assert.match(source, /selectEngine\(preferredEngine, \{ enterConversation: true \}\)/u);
   assert.match(source, /requestEngineDialogClose\(\{ focusTarget: elements\.input \}\)/u);
@@ -101,13 +102,16 @@ test("the disconnected Pages catalog stays in exact ID parity with the Runtime c
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
   assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
   assert.match(css, /\.engine-card\[data-engine-entry="direct"\]/u);
+  assert.match(css, /\.engine-card__icon\s*\{/u);
+  assert.match(source, /ENGINE_ICONS/u);
+  assert.match(source, /icon\.innerHTML = ENGINE_ICONS\[id\] \|\| ENGINE_ICONS\.fallback/u);
   assert.doesNotMatch(css, /\.confidence-switch/u);
   assert.match(css, /\.timing-receipt/u);
   assert.match(css, /\.process-ledger/u);
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v18/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v19/u);
   assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/harness-action-router\.mjs/u);
   assert.match(serviceWorker, /\.\/src\/dialog-interaction\.mjs/u);

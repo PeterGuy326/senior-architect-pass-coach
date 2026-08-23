@@ -1562,7 +1562,10 @@ textarea[disabled] {
 
 .engine-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon title state"
+    "icon detail detail";
   gap: 0.22rem 0.8rem;
   width: 100%;
   padding: 0.82rem 0.95rem;
@@ -1571,6 +1574,19 @@ textarea[disabled] {
   cursor: pointer;
   background: #f6f0e1;
   border: 1px solid #cdbd9c;
+}
+
+.engine-card__icon {
+  grid-area: icon;
+  align-self: center;
+  width: 2.1rem;
+  height: 2.1rem;
+}
+
+.engine-card__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .engine-card[data-engine-selectable="false"] {
@@ -1609,12 +1625,15 @@ textarea[disabled] {
 }
 
 .engine-card__title {
+  grid-area: title;
+  align-self: center;
   font-family: var(--font-editorial);
   font-size: 1rem;
   font-weight: 700;
 }
 
 .engine-card__state {
+  grid-area: state;
   align-self: center;
   color: var(--jade);
   font-size: 0.7rem;
@@ -1641,7 +1660,7 @@ textarea[disabled] {
 }
 
 .engine-card__detail {
-  grid-column: 1 / -1;
+  grid-area: detail;
   color: #626c82;
   font-size: 0.74rem;
 }
