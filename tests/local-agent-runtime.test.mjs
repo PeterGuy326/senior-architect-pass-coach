@@ -631,6 +631,20 @@ test("CORS preflight allows only the exact Pages origin, route method, headers a
   assert.equal(withoutPnaRequest.headers.get("access-control-allow-methods"), "GET");
   assert.equal(withoutPnaRequest.headers.get("access-control-allow-private-network"), null);
 
+  for (const engine of ["codex", "qoder", "hermes"]) {
+    const consentPreflight = await fetch(`${environment.runtime.origin}/v1/adapters/${engine}/personal-consent`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: PUBLIC_COACH_ORIGIN,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization, content-type, x-coach-protocol",
+        "Sec-Fetch-Site": "cross-site",
+      },
+    });
+    assert.equal(consentPreflight.status, 204, engine);
+    assert.equal(consentPreflight.headers.get("access-control-allow-methods"), "POST", engine);
+  }
+
   for (const [name, headers, expectedStatus] of [
     ["malicious origin", {
       Origin: "https://attacker.example",
