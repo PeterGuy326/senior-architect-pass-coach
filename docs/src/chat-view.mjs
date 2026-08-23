@@ -385,22 +385,39 @@ export function createChatView({
     elapsedNode.setAttribute("aria-hidden", "true");
     heading.append(titleNode, elapsedNode);
     const engineNode = engine ? node("p", "process-ledger__engine", engine) : null;
-    const list = node("ol", "process-ledger__stages");
+    const list = node("ol", "process-ledger__stages process-ledger__path");
     const stageRows = normalizedStages.map((stage, index) => {
       const row = node("li", "process-stage");
       row.dataset.state = index === 0 ? "active" : "pending";
       row.dataset.processStage = stage.id;
-      const mark = node("span", "process-stage__mark", index === 0 ? "进行" : String(index + 1).padStart(2, "0"));
+      row.dataset.expanded = "false";
+      row.tabIndex = 0;
+      row.setAttribute("role", "button");
+      row.setAttribute("aria-expanded", "false");
+      row.setAttribute("aria-label", `${stage.label}，点击展开或收起执行细节`);
+      const mark = node("span", "process-stage__mark", index === 0 ? "" : String(index + 1));
       mark.setAttribute("aria-hidden", "true");
       const copy = node("span", "process-stage__copy");
       copy.append(node("strong", "", stage.label));
       if (stage.detail) copy.append(node("small", "", stage.detail));
       row.append(mark, copy);
+      const toggleDetail = () => {
+        const expanded = row.dataset.expanded !== "true";
+        row.dataset.expanded = expanded ? "true" : "false";
+        row.setAttribute("aria-expanded", expanded ? "true" : "false");
+      };
+      row.addEventListener("click", toggleDetail);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggleDetail();
+      });
       list.append(row);
-      return { ...stage, row, mark, copy };
+      return { ...stage, row, mark, copy, startedAtMs: index === 0 ? 0 : null, durationLabel: "" };
     });
     const boundary = node("p", "process-ledger__boundary", "仅展示可验证的执行节点，不展示模型内部思维链。");
-    paper.append(heading, engineNode, list, boundary);
+    const hint = node("p", "process-ledger__hint", "点击任一节点可展开或收起该步的执行细节。");
+    paper.append(heading, engineNode, list, boundary, hint);
     item.append(byline, paper);
     timeline.append(item);
     item.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION ? "auto" : "smooth" });
@@ -420,11 +437,36 @@ export function createChatView({
       renderElapsed();
     }
 
+    function setStageTime(stage) {
+      let timeNode = stage.copy.querySelector(".process-stage__time");
+      if (!stage.durationLabel) {
+        if (timeNode) timeNode.remove();
+        return;
+      }
+      if (!timeNode) {
+        timeNode = node("em", "process-stage__time");
+        stage.copy.append(timeNode);
+      }
+      timeNode.textContent = `本步用时 ${stage.durationLabel}`;
+    }
+
     function setStageState(index, state, detail = "") {
       const stage = stageRows[index];
       if (!stage) return;
+      const previousState = stage.row.dataset.state;
       stage.row.dataset.state = state;
-      stage.mark.textContent = state === "done" ? "成" : state === "active" ? "进行" : state === "error" ? "止" : String(index + 1).padStart(2, "0");
+      stage.mark.textContent = state === "done"
+        ? "✓"
+        : state === "error"
+          ? "✕"
+          : state === "active"
+            ? ""
+            : String(index + 1);
+      if (state === "active" && previousState === "pending") stage.startedAtMs = elapsed();
+      if (state === "done" && previousState !== "done" && stage.startedAtMs !== null) {
+        stage.durationLabel = `${(Math.max(0, elapsed() - stage.startedAtMs) / 1_000).toFixed(1)} 秒`;
+      }
+      setStageTime(stage);
       if (detail) {
         let detailNode = stage.copy.querySelector("small");
         if (!detailNode) {

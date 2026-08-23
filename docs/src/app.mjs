@@ -142,8 +142,8 @@ const STATIC_AGENT_CATALOG = Object.freeze([
   }),
 ]);
 const ENGINE_ICONS = Object.freeze({
-  codex: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#101010\"/><path d=\"M16 7.8l7 4.1v8.2l-7 4.1-7-4.1v-8.2z\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.9\" stroke-linejoin=\"round\"/><path d=\"M16 16l7-4.1M16 16l-7-4.1M16 16v8.2\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"1.5\" stroke-linejoin=\"round\"/></svg>",
-  qoder: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#0ba85c\"/><circle cx=\"15.2\" cy=\"15.2\" r=\"6.2\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.6\"/><path d=\"M19.6 19.6l4.4 4.4\" stroke=\"#ffffff\" stroke-width=\"2.6\" stroke-linecap=\"round\"/></svg>",
+  codex: "<img src=\"./assets/engine-codex.svg\" alt=\"\" loading=\"lazy\"/>",
+  qoder: "<img src=\"./assets/engine-qoder.svg\" alt=\"\" loading=\"lazy\"/>",
   fallback: "<svg viewBox=\"0 0 32 32\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#5f6470\"/><path d=\"M10.5 11.5l5 4.5-5 4.5\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><path d=\"M17.5 21h5\" stroke=\"#ffffff\" stroke-width=\"2.4\" stroke-linecap=\"round\"/></svg>",
 });
 const ADAPTER_STATE_LABELS = Object.freeze({
