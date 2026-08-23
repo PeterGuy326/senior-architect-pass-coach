@@ -119,7 +119,7 @@ test("the disconnected Pages catalog presents only Codex and Qoder as a subset o
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
   const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v20/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v21/u);
   assert.match(serviceWorker, /\.\/assets\/engine-codex\.svg/u);
   assert.match(serviceWorker, /\.\/assets\/engine-qoder\.svg/u);
   assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
