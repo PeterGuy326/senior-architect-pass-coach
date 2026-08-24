@@ -114,6 +114,6 @@ test("Pages exposes a mandatory Local Agent gate and no browser tutor card", asy
   assert.match(chatView, /本步用时/u);
   assert.match(chatView, /点击任一节点可展开或收起该步的执行细节/u);
   assert.match(chatView, /仅展示可验证的执行节点，不展示模型内部思维链。/u);
-  assert.match(serviceWorker, /architect-pass-coach-pages-v20/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v21/u);
   assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
 });

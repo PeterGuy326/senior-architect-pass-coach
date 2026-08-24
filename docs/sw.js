@@ -1,4 +1,4 @@
-const CACHE_NAME = "architect-pass-coach-pages-v20";
+const CACHE_NAME = "architect-pass-coach-pages-v21";
 const CACHE_PREFIX = "architect-pass-coach-pages-";
 const CORE_ASSETS = Object.freeze([
   "./",
@@ -55,38 +55,46 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/v1/")) return;
 
-  const network = fetch(request).then((response) => {
+  const isCacheable = (response) => {
     const cacheControl = String(response.headers.get("cache-control") || "").toLowerCase();
     const vary = String(response.headers.get("vary") || "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean);
-    const cacheable = response.status === 200
+    return response.status === 200
       && response.type !== "error"
       && response.type !== "opaque"
       && request.cache !== "no-store"
       && !request.headers.has("range")
       && !/(?:^|,)\s*no-store(?:\s*(?:,|$))/u.test(cacheControl)
       && !vary.includes("*");
-    return { response, cacheCopy: cacheable ? response.clone() : null };
-  });
+  };
 
-  event.waitUntil(
-    network
-      .then(({ cacheCopy }) => (
-        cacheCopy ? caches.open(CACHE_NAME).then((cache) => cache.put(request, cacheCopy)) : undefined
-      ))
-      .catch(() => undefined),
-  );
+  const refresh = async () => {
+    try {
+      const response = await fetch(request);
+      if (isCacheable(response)) {
+        // A failed cache write must never mask a good network response.
+        try {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(request, response.clone());
+        } catch { /* ignore */ }
+      }
+      return response;
+    } catch {
+      return null;
+    }
+  };
 
-  event.respondWith(
-    network
-      .then(({ response }) => response)
-      .catch(async () => {
-        const cached = await caches.match(request);
-        if (cached) return cached;
-        if (request.mode === "navigate") return caches.match("./index.html");
-        throw new Error("OFFLINE_ASSET_UNAVAILABLE");
-      }),
-  );
+  event.respondWith((async () => {
+    const cached = request.cache !== "no-store" ? await caches.match(request) : null;
+    if (cached) {
+      event.waitUntil(refresh());
+      return cached;
+    }
+    const response = await refresh();
+    if (response) return response;
+    if (request.mode === "navigate") return caches.match("./index.html");
+    throw new Error("OFFLINE_ASSET_UNAVAILABLE");
+  })());
 });

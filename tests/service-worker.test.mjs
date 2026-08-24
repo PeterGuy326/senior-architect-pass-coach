@@ -40,7 +40,7 @@ async function loadServiceWorker({
   return listeners;
 }
 
-test("Service Worker v20 precaches the mandatory Local Agent gate module", async () => {
+test("Service Worker v21 precaches the mandatory Local Agent gate module", async () => {
   const opened = [];
   let coreAssets = [];
   const listeners = await loadServiceWorker({
@@ -53,17 +53,48 @@ test("Service Worker v20 precaches the mandatory Local Agent gate module", async
   });
   await Promise.all(lifetime);
 
-  assert.deepEqual(opened, ["architect-pass-coach-pages-v20"]);
+  assert.deepEqual(opened, ["architect-pass-coach-pages-v21"]);
   assert.equal(coreAssets.filter((asset) => asset === "./src/local-agent-gate.mjs").length, 1);
   assert.ok(coreAssets.includes("./src/app.mjs"));
   assert.ok(coreAssets.includes("./index.html"));
+});
+
+function dispatchFetch(listener, request) {
+  let responsePromise = null;
+  const lifetime = [];
+  listener({
+    request,
+    respondWith(value) { responsePromise = Promise.resolve(value); },
+    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
+  });
+  return { responsePromise, lifetime };
+}
+
+test("Service Worker serves the cached copy immediately and revalidates in the background", async () => {
+  const cached = new Response("cached", { status: 200 });
+  let resolveNetwork;
+  const networkGate = new Promise((resolve) => { resolveNetwork = resolve; });
+  let puts = 0;
+  const listeners = await loadServiceWorker({
+    fetchImpl: async () => { await networkGate; return new Response("fresh", { status: 200 }); },
+    cacheMatch: (request) => (String(request.url).endsWith("/src/app.mjs") ? cached : null),
+    cachePut: async () => { puts += 1; },
+  });
+  const event = dispatchFetch(
+    listeners.get("fetch"),
+    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/app.mjs"),
+  );
+  assert.equal(await (await event.responsePromise).text(), "cached");
+  resolveNetwork();
+  await Promise.all(event.lifetime);
+  assert.equal(puts, 1);
 });
 
 test("Service Worker activation deletes only older caches owned by this Page", async () => {
   const deleted = [];
   const listeners = await loadServiceWorker({
     cacheNames: [
-      "architect-pass-coach-pages-v20",
+      "architect-pass-coach-pages-v21",
       "architect-pass-coach-pages-v18",
       "other-github-pages-project-v9",
     ],
@@ -77,17 +108,6 @@ test("Service Worker activation deletes only older caches owned by this Page", a
 
   assert.deepEqual(deleted, ["architect-pass-coach-pages-v18"]);
 });
-
-function dispatchFetch(listener, request) {
-  let responsePromise = null;
-  const lifetime = [];
-  listener({
-    request,
-    respondWith(value) { responsePromise = Promise.resolve(value); },
-    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
-  });
-  return { responsePromise, lifetime };
-}
 
 test("Service Worker cache write failures never replace a successful network response", async () => {
   const networkResponse = new Response("fresh", { status: 200 });
