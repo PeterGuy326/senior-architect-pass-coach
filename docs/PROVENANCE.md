@@ -1,14 +1,27 @@
 # 来源与许可证边界
 
-## 本仓库原创部分
+> **当前状态（自 2026-08-31 起）**：GitHub Pages 只负责把用户引导到 Agent-first 复习仓库，不再从浏览器读取题库，也不再发布新的 Local Agent Runtime。下方旧集成说明作为历史审计记录保留。
+
+## 当前发布边界
+
+- Pages 首页、当前隐私页和停用提示页是本仓库的静态原创内容，以本仓库许可证发布。
+- 题库、教学规范、本机 `.study/` 协议和可选考试页由 [`senior-software-architect-review`](https://github.com/PeterGuy326/senior-software-architect-review) 直接交付；本仓库不复制其中的题库与答案。
+- 用户自己选择的 Codex、Claude Code、Qwen Code 或其他 Agent 与模型服务不由本仓库分发。
+- 已有 Runtime Release 和历史源码仅供审计与复盘；自动 Runtime bundle/release 工作流已经移除。
+
+## 历史 Pages + Runtime 集成（已停用）
+
+以下内容描述 `v0.7.0` 预览实现，不是当前产品路径。
+
+### 本仓库原创部分
 
 本仓库的 Workbench、确定性进度引擎、员工包契约、课程调度索引和原创文档以 Apache-2.0 发布。
 
-## Digital Employee
+### Digital Employee
 
 `@fullstack-ai-infra/digital-employee` `0.3.0` 是 Apache-2.0 的独立 npm 依赖。本仓库通过其公开 API 做员工包校验、离线评测与显式选择的 Agent Host 执行，没有复制框架源代码，也不改变其作者归属。预编译 Local Runtime 预览包会包含锁定后的 npm 依赖和 Node 运行时，仍保留各自许可证与 `NOTICE`。Claude Code、Qwen Code、CodeBuddy、Qoder、Codex 与 Hermes Agent（Nous Research）等外部 CLI 均由用户系统提供，不会被本项目未经许可打进安装包；其中 Hermes 当前只探测可执行文件，尚无执行 Adapter。Codex 在框架中也仍是 probe-only；本仓库额外提供的 `codex-personal-experimental` 是案例级、明确同意的外部 CLI 调用路径，不修改或冒充框架 Adapter。详见根目录 `NOTICE`。
 
-## 公开复习资料
+### 公开复习资料
 
 [senior-software-architect-review](https://github.com/PeterGuy326/senior-software-architect-review) 是用户可自行获取的外部复习资料源。截至本项目建立时，该仓库没有声明 LICENSE；“公开可访问”不等于获得再分发许可。
 

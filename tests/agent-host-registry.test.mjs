@@ -19,7 +19,7 @@ test("the coach catalog declares six engines including a truthful Hermes entry",
   );
 });
 
-test("the disconnected Pages catalog presents only Codex and Qoder as a subset of the Runtime catalog", async () => {
+test("the legacy browser catalog remains a truthful subset of the Runtime catalog", async () => {
   const source = await readFile(new URL("../docs/src/app.mjs", import.meta.url), "utf8");
   const actionRouter = await readFile(new URL("../docs/src/harness-action-router.mjs", import.meta.url), "utf8");
   const catalogSource = source.slice(
@@ -86,19 +86,6 @@ test("the disconnected Pages catalog presents only Codex and Qoder as a subset o
   assert.match(actionRouter, /action\.operation === "focus-answer"/u);
   assert.match(source, /event\.key !== "Enter" \|\| event\.shiftKey \|\| event\.isComposing/u);
   assert.match(source, /elements\.answerForm\.requestSubmit\(\)/u);
-  const html = await readFile(new URL("../docs/index.html", import.meta.url), "utf8");
-  assert.match(html, /先接入本机 Agent，再开始私教/u);
-  assert.match(html, /未连接时，对话、建档、出题和复习均保持锁定/u);
-  assert.doesNotMatch(html, /data-engine="content-only"/u);
-  assert.doesNotMatch(html, /name="confidence"|id="confidence-field"|<legend>自报把握度<\/legend>/u);
-  assert.match(html, /按题目长短计算参考用时.*实际前台有效用时/u);
-  assert.match(html, /直接点击想用的 Agent/u);
-  assert.match(html, /检测全部本机 Agent/u);
-  assert.match(html, /enterkeyhint="send"/u);
-  assert.match(html, /Enter 发送 · Shift \+ Enter 换行/u);
-  assert.match(html, /选择下一轮的响应速度/u);
-  assert.match(html, /id="engine-dialog-close"/u);
-  assert.match(html, /aria-describedby="runtime-context engine-dialog-status"/u);
   const css = await readFile(new URL("../docs/assets/app.css", import.meta.url), "utf8");
   assert.match(css, /\.engine-card\[data-engine-selectable="false"\]\s*\{[^}]*opacity:\s*1/su);
   assert.match(css, /\.engine-card\[data-engine-entry="direct"\]/u);
@@ -118,14 +105,6 @@ test("the disconnected Pages catalog presents only Codex and Qoder as a subset o
   assert.match(css, /\.process-stage\[data-expanded="true"\]/u);
   assert.match(css, /\.coach-suggestions/u);
   assert.match(css, /\.model-profile-card/u);
-  const serviceWorker = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
-  assert.match(serviceWorker, /architect-pass-coach-pages-v21/u);
-  assert.match(serviceWorker, /\.\/assets\/engine-codex\.svg/u);
-  assert.match(serviceWorker, /\.\/assets\/engine-qoder\.svg/u);
-  assert.match(serviceWorker, /\.\/src\/harness-actions\.mjs/u);
-  assert.match(serviceWorker, /\.\/src\/harness-action-router\.mjs/u);
-  assert.match(serviceWorker, /\.\/src\/dialog-interaction\.mjs/u);
-  assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
 });
 
 test("an installed Hermes executable remains probe-only without a conformance adapter", async () => {

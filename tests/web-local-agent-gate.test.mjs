@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -9,7 +9,7 @@ import {
   LOCAL_AGENT_GATE_STATES,
 } from "../docs/src/local-agent-gate.mjs";
 
-test("Local Agent gate unlocks only for one connected selectable Agent", () => {
+test("legacy Local Agent gate unlocks only for one connected selectable Agent", () => {
   const cases = [
     [{}, LOCAL_AGENT_GATE_STATES.REQUIRED],
     [{ connected: false, engine: "claude-code", selectable: true }, LOCAL_AGENT_GATE_STATES.REQUIRED],
@@ -25,7 +25,7 @@ test("Local Agent gate unlocks only for one connected selectable Agent", () => {
   }
 });
 
-test("Local Agent assertion fails closed without exposing a content-only fallback", () => {
+test("legacy Local Agent assertion remains fail-closed for historical callers", () => {
   for (const input of [
     {},
     { connected: true, engine: "content-only", selectable: true },
@@ -40,80 +40,51 @@ test("Local Agent assertion fails closed without exposing a content-only fallbac
   assert.match(localAgentGateCopy(LOCAL_AGENT_GATE_STATES.REQUIRED).detail, /不提供浏览器伪聊天机器人/u);
 });
 
-test("Pages exposes a mandatory Local Agent gate and no browser tutor card", async () => {
-  const [html, app, chatView, router, serviceWorker] = await Promise.all([
+test("Pages is a static Agent-first handoff and exposes no Runtime gate or browser tutor", async () => {
+  const [html, privacy, retiredPair, landing, serviceWorker] = await Promise.all([
     readFile(new URL("../docs/index.html", import.meta.url), "utf8"),
-    readFile(new URL("../docs/src/app.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../docs/src/chat-view.mjs", import.meta.url), "utf8"),
-    readFile(new URL("../docs/src/harness-action-router.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../docs/privacy.html", import.meta.url), "utf8"),
+    readFile(new URL("../docs/pair.html", import.meta.url), "utf8"),
+    readFile(new URL("../docs/src/landing.mjs", import.meta.url), "utf8"),
     readFile(new URL("../docs/sw.js", import.meta.url), "utf8"),
   ]);
 
-  assert.match(html, /id="agent-gate"/u);
-  assert.match(html, /先接入本机 Agent，再开始私教/u);
-  assert.match(html, /不提供浏览器伪聊天机器人/u);
-  assert.match(html, /id="chat-timeline"[\s\S]*aria-hidden="true"[\s\S]*hidden/u);
-  assert.match(html, /id="answer-form"[^>]*hidden/u);
-  assert.doesNotMatch(html, /data-engine="content-only"|基础私教无需|始终可用/u);
+  assert.match(html, /入口就是[\s\S]*你正在使用的/u);
+  assert.match(html, /senior-software-architect-review/u);
+  assert.match(html, /开始私教，我只求考过/u);
+  assert.match(html, /python3 scripts\/serve\.py/u);
+  assert.match(html, /不下载 Runtime/u);
+  assert.doesNotMatch(html, /id="agent-gate"|id="chat-timeline"|id="answer-form"/u);
+  assert.doesNotMatch(html, /127\.0\.0\.1:43127|local-agent-client|src\/app\.mjs/u);
+  assert.match(privacy, /当前 GitHub Pages 只是静态使用说明/u);
+  assert.match(privacy, /\.study\//u);
+  assert.doesNotMatch(privacy, /src\/pair\.mjs|id="pair-approve"/u);
+  assert.match(retiredPair, /这个连接页已经停用/u);
+  assert.doesNotMatch(retiredPair, /src\/pair\.mjs|id="pair-approve"|postMessage/u);
+  assert.match(landing, /navigator\.clipboard\.writeText/u);
+  assert.match(landing, /serviceWorker\.register\("\.\/sw\.js"/u);
+  assert.match(serviceWorker, /architect-pass-coach-pages-v22/u);
+  assert.match(serviceWorker, /\.\/src\/landing\.mjs/u);
+  assert.doesNotMatch(serviceWorker, /\.\/src\/local-agent-gate\.mjs|\.\/src\/app\.mjs/u);
+});
 
-  assert.match(app, /assertLocalAgentAccess/u);
-  for (const functionName of [
-    "launchCoach",
-    "submitAnswer",
-    "showProgress",
-    "showTasks",
-    "continueStudy",
-    "showHelp",
-    "askAgent",
-    "handleHarnessAction",
-    "handleChatInput",
-  ]) {
-    const start = app.indexOf(`function ${functionName}`);
-    const next = app.indexOf("\nfunction ", start + 10);
-    const body = app.slice(start, next < 0 ? app.length : next);
-    assert.ok(start >= 0, functionName);
-    assert.match(body, /requireLocalAgentAccess/u, functionName);
+test("every published HTML entry is Agent-first or an inert retirement notice", async () => {
+  const docsUrl = new URL("../docs/", import.meta.url);
+  const htmlNames = (await readdir(docsUrl))
+    .filter((name) => name.endsWith(".html"))
+    .sort();
+  assert.deepEqual(htmlNames, ["index.html", "pair.html", "privacy.html"]);
+
+  for (const name of htmlNames) {
+    const html = await readFile(new URL(name, docsUrl), "utf8");
+    assert.doesNotMatch(
+      html,
+      /src\/(?:app|pair)\.mjs|id="(?:agent-gate|pair-approve|chat-timeline|answer-form)"|127\.0\.0\.1:43127|runtime-install-link/u,
+      name,
+    );
   }
-  assert.doesNotMatch(app.slice(app.lastIndexOf("setToday()")), /restoreExistingProfile\(\)/u);
-  assert.match(app, /answerSurfaceVisible\(\)[\s\S]*agentChatAvailable\(\)/u);
-  assert.match(app, /function agentChatAvailable\(\)[\s\S]*LOCAL_AGENT_GATE_STATES\.READY && !profileRestoreFailed/u);
-  assert.match(app, /elements\.timeline\.inert = !ready/u);
-  assert.match(app, /elements\.answerForm\.hidden = !interactive/u);
-  assert.match(app, /elements\.optionPanel\.hidden = !interactive \|\| currentView\?\.state !== "awaiting_answer"/u);
-  for (const learnerDataElement of ["taskList", "taskSummary", "subjectList", "evidenceBadge"]) {
-    assert.match(app, new RegExp(`elements\\.${learnerDataElement}\\.hidden = !interactive`, "u"));
-  }
-  assert.match(app, /MOBILE_LOCAL_AGENT_UNAVAILABLE[\s\S]*移动设备无法连接电脑上的 Runtime/u);
-  assert.match(app, /if \(relocked\)[\s\S]*elements\.agentGate\.focus/u);
-
-  const importButton = html.match(/<button[^>]*data-command="import"[^>]*>/u)?.[0] || "";
-  const exportButton = html.match(/<button[^>]*data-command="export"[^>]*>/u)?.[0] || "";
-  const clearButton = html.match(/<button[^>]*data-command="clear"[^>]*>/u)?.[0] || "";
-  assert.match(importButton, /data-requires-agent/u);
-  assert.match(importButton, /data-allows-profile-repair/u);
-  assert.match(exportButton, /data-requires-agent/u);
-  assert.doesNotMatch(clearButton, /data-requires-agent/u);
-  assert.match(html, /id="import-file"[\s\S]*?aria-label="选择要导入的私人档案 JSON 文件"[\s\S]*?disabled/u);
-  assert.match(app, /elements\.importFile\.disabled = !ready \|\| operating/u);
-
-  for (const functionName of ["requestImport", "importProfile"]) {
-    const start = app.indexOf(`function ${functionName}`);
-    const next = app.indexOf("\nfunction ", start + 10);
-    const body = app.slice(start, next < 0 ? app.length : next);
-    assert.ok(start >= 0, functionName);
-    assert.match(body, /requireLocalAgentAccess/u, functionName);
-    assert.match(body, /allowProfileRepair: true/u, functionName);
-  }
-  assert.match(app, /if \(profileRestoreFailed\)[\s\S]*导入可信备份[\s\S]*return false/u);
-  assert.match(router, /context\.agentAvailable !== true[\s\S]*return false/u);
-
-  assert.match(chatView, /role === "coach"[\s\S]*label: "本机 Agent"/u);
-  assert.match(chatView, /label: "本地 Harness"/u);
-  assert.match(chatView, /appendMessage\("harness"/u);
-  assert.match(chatView, /setAttribute\("aria-expanded"/u);
-  assert.match(chatView, /本步用时/u);
-  assert.match(chatView, /点击任一节点可展开或收起该步的执行细节/u);
-  assert.match(chatView, /仅展示可验证的执行节点，不展示模型内部思维链。/u);
-  assert.match(serviceWorker, /architect-pass-coach-pages-v21/u);
-  assert.match(serviceWorker, /\.\/src\/local-agent-gate\.mjs/u);
+  await assert.rejects(
+    access(new URL("../.github/workflows/runtime-bundle.yml", import.meta.url)),
+    (error) => error?.code === "ENOENT",
+  );
 });

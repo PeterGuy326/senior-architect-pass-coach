@@ -4,278 +4,160 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <meta name="theme-color" content="#17213f">
+    <meta name="theme-color" content="#123b5d">
     <meta name="referrer" content="no-referrer">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com http://127.0.0.1:43127; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
     >
     <meta
       name="description"
-      content="系统架构设计师过线私教：连接本机 Agent 后，在浏览器里完成诊断、刷题和弱项复习。"
+      content="系统架构设计师过线私教：直接使用 Codex、Claude Code、Qwen Code 等本地 Agent 打开复习仓库，按真实作答因材施教。"
     >
-    <title>架构过线私塾 · 本机 Agent 私教</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%2317213f%22/%3E%3Crect%20x=%228%22%20y=%228%22%20width=%2248%22%20height=%2248%22%20fill=%22%23a33b2e%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2232%22%20fill=%22%23fffdf7%22%3E%E6%9E%B6%3C/text%3E%3C/svg%3E">
+    <title>系统架构设计师过线私教 · Agent 即入口</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%23123b5d%22/%3E%3Ccircle%20cx=%2232%22%20cy=%2232%22%20r=%2222%22%20fill=%22none%22%20stroke=%22%23f2c66d%22%20stroke-width=%222%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2230%22%20fill=%22%23fffaf0%22%3E%E8%BF%87%3C/text%3E%3C/svg%3E">
     <link rel="manifest" href="./manifest.webmanifest">
-    <link rel="stylesheet" href="./assets/app.css">
-    <script type="module" src="./src/app.mjs"></script>
+    <link rel="stylesheet" href="./assets/landing.css">
+    <script type="module" src="./src/landing.mjs"></script>
   </head>
   <body>
-    <a class="skip-link" href="#study-desk">跳到私教主区</a>
+    <a class="skip-link" href="#main">跳到主要内容</a>
 
-    <header class="masthead">
-      <div class="masthead__inner">
-        <a class="brand" href="./" aria-label="架构过线私塾首页">
-          <span class="brand__seal" aria-hidden="true">架</span>
-          <span>
-            <span class="brand__eyebrow">SYSTEM ARCHITECT · PASS COACH</span>
-            <span class="brand__name">架构过线私塾</span>
-          </span>
-        </a>
-        <p class="masthead__motto">夜读一卷，批注一题，稳稳过线。</p>
-        <nav class="masthead__nav" aria-label="页面导航">
-          <a href="#study-desk">连接 Agent</a>
-          <a href="./privacy.html">隐私说明</a>
-          <a
-            href="https://github.com/PeterGuy326/senior-architect-pass-coach"
-            rel="noreferrer"
-          >源代码</a>
-        </nav>
-      </div>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="系统架构设计师过线私教首页">
+        <span class="brand__seal" aria-hidden="true">过</span>
+        <span>
+          <strong>系统架构设计师过线私教</strong>
+          <small>AGENT-FIRST · PASS 45</small>
+        </span>
+      </a>
+      <nav aria-label="主要导航">
+        <a href="#how">怎么开始</a>
+        <a href="#exam">模拟考试</a>
+        <a href="https://github.com/PeterGuy326/senior-software-architect-review" rel="noreferrer">复习仓库</a>
+      </nav>
     </header>
 
-    <main class="page-shell" id="study-desk">
-      <aside class="study-rail" aria-label="今日复习概览">
-        <section class="ledger ledger--tasks" aria-labelledby="today-title">
-          <div class="ledger__heading">
-            <p class="folio">今日课签</p>
-            <span class="date-chip" id="today-date" aria-label="今天日期">今日</span>
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero__copy reveal">
+          <p class="kicker">不用再连接另一层 Agent</p>
+          <h1 id="hero-title">入口就是<br>你正在使用的 <em>Agent</em>。</h1>
+          <p class="hero__lead">
+            用 Codex、Claude Code、Qwen Code 或其他能读写本地仓库的 Agent
+            打开复习资料。它直接读取你的真实进度，只补最可能拖你下 45 分的地方。
+          </p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="https://github.com/PeterGuy326/senior-software-architect-review" rel="noreferrer">打开复习仓库</a>
+            <a class="button button--quiet" href="#how">三步开始</a>
           </div>
-          <h2 id="today-title">三题以内，先补最该补的</h2>
-          <ol class="task-list" id="task-list">
-            <li data-task-state="current">
-              <span class="task-index">壹</span>
-              <span class="task-copy">连接本机 Agent 后开始诊断</span>
-            </li>
-            <li>
-              <span class="task-index">贰</span>
-              <span class="task-copy">根据作答证据调整弱项</span>
-            </li>
-            <li>
-              <span class="task-index">叁</span>
-              <span class="task-copy">完成复测或收束今日任务</span>
-            </li>
-          </ol>
-          <p class="ledger__footnote" id="task-summary">尚未开始 · 每轮最多 3 项</p>
-        </section>
-
-        <section class="ledger ledger--score" aria-labelledby="score-title">
-          <p class="folio">过线坐标</p>
-          <h2 id="score-title">不追满分，先把确定性做出来</h2>
-          <div class="score-ruler" aria-label="45 分及格线，52 分安全目标">
-            <div class="score-ruler__track" aria-hidden="true">
-              <span class="score-ruler__pass"></span>
-              <span class="score-ruler__safe"></span>
-            </div>
-            <div class="score-ruler__labels">
-              <span><strong>45</strong>及格线</span>
-              <span><strong>52</strong>安全目标</span>
-            </div>
-          </div>
-          <p class="score-note">策略：高频考点优先，错题复测优先，疑似猜中先复测。</p>
-        </section>
-
-        <section class="ledger ledger--progress" aria-labelledby="progress-title">
-          <div class="ledger__heading">
-            <p class="folio">掌握簿</p>
-            <span class="evidence-badge" id="evidence-badge">尚无证据</span>
-          </div>
-          <h2 id="progress-title">按真实作答更新</h2>
-          <div class="subject-list" id="subject-list">
-            <p class="empty-copy">建档并完成诊断后，这里才会出现你的强弱项。</p>
-          </div>
-        </section>
-      </aside>
-
-      <section class="coach-desk" aria-labelledby="coach-title">
-        <header class="coach-desk__header">
-          <div>
-            <p class="folio folio--light">本日夜读 · 综合客观题</p>
-            <h1 id="coach-title">你的本机 Agent 私教</h1>
-          </div>
-          <div class="session-mark" aria-label="会话状态">
-            <span class="session-mark__dot" id="session-dot" aria-hidden="true"></span>
-            <span id="session-label">等待本机 Agent</span>
-          </div>
-        </header>
-
-        <div class="truth-strip" aria-label="运行方式说明">
-          <span>学习证据仅存此浏览器</span>
-          <span>固定公开题库版本</span>
-          <button class="engine-trigger" id="engine-trigger" type="button" aria-haspopup="dialog" aria-controls="engine-dialog" aria-expanded="false">
-            <span id="engine-trigger-label">尚未接入 · 连接本机 Agent</span>
-            <span aria-hidden="true">⌄</span>
-          </button>
+          <ul class="trust-list" aria-label="产品边界">
+            <li>不下载 Runtime</li>
+            <li>不向网页填写 API Key</li>
+            <li>私人数据只在本机</li>
+          </ul>
         </div>
 
-        <section class="chat-sheet" aria-label="私教对话">
-          <section class="agent-gate" id="agent-gate" aria-labelledby="agent-gate-title" tabindex="-1">
-            <div class="agent-gate__seal" aria-hidden="true">接</div>
-            <div class="agent-gate__copy">
-              <p class="folio">LOCAL AGENT REQUIRED</p>
-              <h2 id="agent-gate-title">先接入本机 Agent，再开始私教</h2>
-              <p id="agent-gate-detail">这里不提供浏览器伪聊天机器人，也不会在连接失败时退回规则话术。安装一次 Runtime，然后由你明确选择本机 Agent。</p>
-              <ol class="agent-gate__steps" aria-label="接入步骤">
-                <li><span>壹</span>安装或启动本机 Runtime</li>
-                <li><span>贰</span>确认当前网页的本机授权</li>
-                <li><span>叁</span>选择通过员工契约检查的 Agent</li>
-              </ol>
-              <div class="agent-gate__actions">
-                <button class="primary-action" id="agent-gate-connect" type="button" aria-haspopup="dialog" aria-controls="engine-dialog" aria-expanded="false">连接并选择本机 Agent <span aria-hidden="true">→</span></button>
-                <a class="source-link" href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.2" rel="noreferrer">打开 / 安装 Runtime <span aria-hidden="true">↗</span></a>
-              </div>
-              <p class="agent-gate__status" id="agent-gate-status" role="status">未连接时，对话、建档、出题和复习均保持锁定。桌面 Chrome / Edge 是当前配对主路径；手机和平板无法连接电脑上的 Runtime。</p>
-            </div>
-          </section>
-          <ol
-            class="chat-timeline"
-            id="chat-timeline"
-            aria-live="polite"
-            aria-relevant="additions text"
-            aria-hidden="true"
-            hidden
-          >
-          </ol>
-
-          <div class="option-panel" id="option-panel" hidden aria-label="题目选项"></div>
-
-          <form class="answer-composer" id="answer-form" aria-label="提交答案" hidden>
-            <div class="answer-row">
-              <label class="sr-only" for="answer-input">输入 A 到 H 中的选项，或向已连接的 Agent 提问</label>
-              <textarea
-                id="answer-input"
-                name="answer"
-                maxlength="2000"
-                rows="1"
-                autocomplete="off"
-                autocapitalize="characters"
-                spellcheck="false"
-                enterkeyhint="send"
-                placeholder="输入 A–H；多选可输入 AC 或 A,C"
-                aria-describedby="answer-hint answer-error"
-                disabled
-              ></textarea>
-              <button class="submit-answer" id="submit-answer" type="submit" disabled>交卷</button>
-            </div>
-            <p class="answer-hint" id="answer-hint"><strong>Enter 发送 · Shift + Enter 换行。</strong> 直接作答即可；私教会按题目长短计算参考用时，再按实际前台有效用时自动判断，交卷后显示时间依据。</p>
-            <p class="form-error" id="answer-error" role="alert"></p>
-          </form>
-        </section>
-
-        <nav class="desk-tools" aria-label="学习工具">
-          <button type="button" data-command="progress" data-requires-agent disabled>查看进度</button>
-          <button type="button" data-command="tasks" data-requires-agent disabled>今日任务</button>
-          <button type="button" data-command="continue" data-requires-agent disabled>继续下一题</button>
-          <span class="desk-tools__divider" aria-hidden="true"></span>
-          <button type="button" data-command="export" data-requires-agent disabled>导出档案</button>
-          <button type="button" data-command="import" data-requires-agent data-allows-profile-repair disabled>导入档案</button>
-          <button class="danger-action" type="button" data-command="clear">清除本机数据</button>
-          <input
-            class="sr-only"
-            id="import-file"
-            type="file"
-            accept="application/json,.json"
-            aria-label="选择要导入的私人档案 JSON 文件"
-            disabled
-          >
-        </nav>
-        <p class="app-status" id="app-status" role="status" aria-live="polite"></p>
+        <aside class="score-card reveal reveal--delay" aria-label="过线目标">
+          <div class="score-card__stamp">只求过线</div>
+          <div class="score-card__number">45</div>
+          <p>综合 · 案例 · 论文<br><strong>三科分别过线</strong></p>
+          <div class="score-card__rule">
+            <span class="score--pass">45 合格</span>
+            <span class="score--safe">52 安全</span>
+          </div>
+          <p class="score-card__note">高频优先 · 错题复测 · 证据驱动</p>
+        </aside>
       </section>
 
-      <aside class="source-rail" aria-label="资料与边界">
-        <section class="source-card">
-          <p class="folio">资料钉</p>
-          <h2>每一道题，都要有出处</h2>
-          <p>客观题来自公开复习仓库的固定审阅版本，不会随远端更新悄悄变化。</p>
-          <a
-            class="source-link"
-            href="https://github.com/PeterGuy326/senior-software-architect-review/tree/88f4bdc58e668ac887f2f06e152f69a1c129edd1"
-            rel="noreferrer"
-          >查看固定版本 <span aria-hidden="true">↗</span></a>
-          <code class="commit-slip">88f4bdc5…129edd1</code>
-        </section>
+      <section class="agent-strip" aria-label="支持的本地 Agent">
+        <span>Codex</span>
+        <i aria-hidden="true"></i>
+        <span>Claude Code</span>
+        <i aria-hidden="true"></i>
+        <span>Qwen Code</span>
+        <i aria-hidden="true"></i>
+        <span>其他本地 Agent</span>
+      </section>
 
-        <section class="margin-note" id="runtime-boundary">
-          <p class="margin-note__title">本版边界</p>
-          <ul id="runtime-boundary-list">
-            <li>只练综合知识客观题</li>
-            <li>未接入本机 Agent 时不提供聊天或出题</li>
-            <li>Agent 负责开放式对话与个性化讲解</li>
-            <li>判分与进度始终由本地 Harness 掌管</li>
-          </ul>
-          <a href="./privacy.html">数据与隐私说明</a>
-        </section>
-      </aside>
+      <section class="section" id="how" aria-labelledby="how-title">
+        <div class="section__heading">
+          <p class="folio">01 / 开始</p>
+          <h2 id="how-title">三步，不建另一套账号体系</h2>
+          <p>仓库里的 Agent 规范、题库和进度协议共同构成老师；你原本使用的 Agent 就是交互入口。</p>
+        </div>
+
+        <ol class="steps">
+          <li>
+            <span class="step__number">壹</span>
+            <div>
+              <h3>取得复习仓库</h3>
+              <p>Clone 或在支持 GitHub 仓库的 Agent 中打开 <code>senior-software-architect-review</code>。</p>
+            </div>
+          </li>
+          <li>
+            <span class="step__number">贰</span>
+            <div>
+              <h3>直接告诉 Agent 目标</h3>
+              <p>它会先检查本机私人进度；没有档案就明确建档和诊断，不会编造你的水平。</p>
+              <div class="prompt-box">
+                <code>开始私教，我只求考过。</code>
+                <button type="button" data-copy="开始私教，我只求考过。">复制</button>
+              </div>
+            </div>
+          </li>
+          <li>
+            <span class="step__number">叁</span>
+            <div>
+              <h3>按真实作答继续</h3>
+              <p>说“今天学什么”“复习错题”或“启动综合模拟考试”，Agent 会读取同一份本地证据接着教。</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section section--ink" id="exam" aria-labelledby="exam-title">
+        <div class="exam-copy">
+          <p class="folio">02 / 机考</p>
+          <h2 id="exam-title">网页只做它擅长的事：考试。</h2>
+          <p>
+            75 道高频题、150 分钟倒计时、答题卡、标记、刷新恢复、交卷判分和错因反馈。
+            页面不聊天、不代理模型；答完以后把逐题答案、用时和错因写回本机
+            <code>.study/</code>，当前 Agent 再据此因材施教。
+          </p>
+          <div class="command-card">
+            <span>由 Agent 自动启动，或在复习仓库根目录运行</span>
+            <code>python3 scripts/serve.py</code>
+            <button type="button" data-copy="python3 scripts/serve.py">复制命令</button>
+          </div>
+        </div>
+        <div class="exam-terminal" aria-label="本地考试闭环示意">
+          <div class="terminal__bar"><i></i><i></i><i></i><span>LOCAL EXAM LOOP</span></div>
+          <ol>
+            <li><b>01</b><span>本地 Agent</span><small>启动与教学入口</small></li>
+            <li><b>02</b><span>考试页面</span><small>只负责作答与判分</small></li>
+            <li><b>03</b><span>.study/</span><small>原始证据仅留本机</small></li>
+            <li><b>04</b><span>同一个 Agent</span><small>读取错题并安排复测</small></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="decision" aria-labelledby="decision-title">
+        <p class="folio">03 / 方向</p>
+        <h2 id="decision-title">少一层系统，多一份可验证的学习证据。</h2>
+        <p>
+          此前的 GitHub Pages 对话 Harness 与 Local Agent Runtime 已停止作为用户入口。
+          本仓库保留旧实现供历史审计，但不再要求考生下载 Runtime 或把学习档案放进浏览器。
+          当前产品能力统一在复习仓库中交付。
+        </p>
+        <a href="https://github.com/PeterGuy326/senior-software-architect-review/blob/master/tutor/README.md#%E6%9C%AC%E5%9C%B0%E8%80%83%E8%AF%95%E7%BB%88%E7%AB%AF" rel="noreferrer">查看现在的实现说明 →</a>
+      </section>
     </main>
 
-    <dialog class="engine-dialog" id="engine-dialog" aria-labelledby="engine-dialog-title" aria-describedby="runtime-context engine-dialog-status" aria-busy="false">
-      <div class="engine-dialog__header">
-        <div>
-          <p class="folio">Digital Employee 工作区</p>
-          <h2 id="engine-dialog-title">选择本机 Agent，作为私教大脑</h2>
-        </div>
-        <button class="dialog-close" id="engine-dialog-close" type="button" aria-label="关闭引擎选择">×</button>
-      </div>
-      <p class="engine-dialog__intro" id="runtime-context">
-        直接点击想用的 Agent。页面会在这次点击内唤起并连接 Runtime，验证它与私教员工包兼容后自动进入对话。Agent 只是可替换的大脑；题库、可信判分、行为信号和学习档案始终由浏览器 Harness 掌管。不装任何 Agent 也能完整学习——出题、判分、进度都在浏览器完成，Agent 只是可选的 AI 讲解。
-      </p>
-      <div class="runtime-callout" id="runtime-callout">
-        <p id="runtime-callout-copy">这是公开网页。点击后先检测已运行的 Runtime；macOS 未运行时可唤起已安装应用，Linux 请先运行 start-local-coach。确认服务就绪后才打开 127.0.0.1 配对页，页面加载时不会扫描端口。</p>
-        <a
-          class="source-link"
-          id="runtime-install-link"
-          href="https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.2"
-          rel="noreferrer"
-        >打开 / 安装本机 Runtime <span aria-hidden="true">↗</span></a>
-        <button class="secondary-action" id="runtime-connect" type="button">检测全部本机 Agent</button>
-      </div>
-      <div class="engine-list" id="engine-list" aria-label="讲解引擎状态与选择"></div>
-      <section class="engine-help-panel" id="engine-help-panel" aria-labelledby="engine-help-title" hidden>
-        <div class="engine-help-panel__heading">
-          <div>
-            <p class="folio">本机安装引导</p>
-            <h3 id="engine-help-title">启用 Hermes Agent</h3>
-          </div>
-          <button class="dialog-close" id="engine-help-close" type="button" aria-label="收起安装引导">×</button>
-        </div>
-        <p id="engine-help-copy"></p>
-        <pre class="engine-help-panel__command" id="engine-help-command" hidden></pre>
-        <div class="engine-help-panel__actions">
-          <a class="source-link" id="engine-help-link" target="_blank" rel="noreferrer">打开官方安装说明 <span aria-hidden="true">↗</span></a>
-          <button class="secondary-action" id="engine-help-retest" type="button">装好 / 登录好了，重新检测</button>
-        </div>
-        <p class="engine-help-panel__foot" id="engine-help-status" role="status"></p>
-      </section>
-      <section class="model-profile-panel" id="model-profile-panel" aria-labelledby="model-profile-title" hidden>
-        <div class="model-profile-panel__heading">
-          <div>
-            <p class="folio">Codex 模型档位</p>
-            <h3 id="model-profile-title">选择下一轮的响应速度</h3>
-          </div>
-          <p>只显示本机 Codex 本次实际核验可用的模型；切换不会修改学习档案。</p>
-        </div>
-        <div class="model-profile-list" id="model-profile-list" role="radiogroup" aria-label="Codex 模型档位"></div>
-      </section>
-      <p class="engine-dialog__foot" id="engine-dialog-status" role="status">当前尚未选择本机 Agent。</p>
-    </dialog>
-
-    <footer class="site-footer">
-      <p>系统架构设计师过线私教 · 开源实践案例</p>
-      <p>目标不是漂亮分数，是有证据地稳过 45。</p>
+    <footer>
+      <span>系统架构设计师过线私教</span>
+      <span>本地优先 · 证据优先 · 45 分优先 · <a href="./privacy.html">数据与隐私</a></span>
+      <span>© <span id="year">2026</span></span>
     </footer>
-
-    <noscript>
-      <p class="noscript-note">需要启用 JavaScript 才能在浏览器本地保存进度和完成练习。</p>
-    </noscript>
   </body>
 </html>

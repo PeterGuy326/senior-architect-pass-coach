@@ -11,6 +11,7 @@ async function loadServiceWorker({
   cacheNames = [],
   onCacheDelete = () => {},
   onCacheOpen = () => {},
+  windowClients = [],
 } = {}) {
   const listeners = new Map();
   const source = await readFile(new URL("../docs/sw.js", import.meta.url), "utf8");
@@ -31,16 +32,20 @@ async function loadServiceWorker({
     },
     self: {
       location: { origin: "https://peterguy326.github.io" },
+      registration: { scope: "https://peterguy326.github.io/senior-architect-pass-coach/" },
       addEventListener(type, listener) { listeners.set(type, listener); },
       skipWaiting: async () => {},
-      clients: { claim: async () => {} },
+      clients: {
+        claim: async () => {},
+        matchAll: async () => [...windowClients],
+      },
     },
   });
   vm.runInContext(source, context, { filename: "docs/sw.js" });
   return listeners;
 }
 
-test("Service Worker v21 precaches the mandatory Local Agent gate module", async () => {
+test("Service Worker v22 precaches only the Agent-first landing assets", async () => {
   const opened = [];
   let coreAssets = [];
   const listeners = await loadServiceWorker({
@@ -53,9 +58,12 @@ test("Service Worker v21 precaches the mandatory Local Agent gate module", async
   });
   await Promise.all(lifetime);
 
-  assert.deepEqual(opened, ["architect-pass-coach-pages-v21"]);
-  assert.equal(coreAssets.filter((asset) => asset === "./src/local-agent-gate.mjs").length, 1);
-  assert.ok(coreAssets.includes("./src/app.mjs"));
+  assert.deepEqual(opened, ["architect-pass-coach-pages-v22"]);
+  assert.ok(coreAssets.includes("./src/landing.mjs"));
+  assert.ok(coreAssets.includes("./assets/landing.css"));
+  assert.ok(!coreAssets.includes("./src/app.mjs"));
+  assert.ok(!coreAssets.includes("./pair.html"));
+  assert.ok(!coreAssets.includes("./privacy.html"));
   assert.ok(coreAssets.includes("./index.html"));
 });
 
@@ -77,12 +85,12 @@ test("Service Worker serves the cached copy immediately and revalidates in the b
   let puts = 0;
   const listeners = await loadServiceWorker({
     fetchImpl: async () => { await networkGate; return new Response("fresh", { status: 200 }); },
-    cacheMatch: (request) => (String(request.url).endsWith("/src/app.mjs") ? cached : null),
+    cacheMatch: (request) => (String(request.url).endsWith("/src/landing.mjs") ? cached : null),
     cachePut: async () => { puts += 1; },
   });
   const event = dispatchFetch(
     listeners.get("fetch"),
-    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/app.mjs"),
+    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/landing.mjs"),
   );
   assert.equal(await (await event.responsePromise).text(), "cached");
   resolveNetwork();
@@ -90,11 +98,33 @@ test("Service Worker serves the cached copy immediately and revalidates in the b
   assert.equal(puts, 1);
 });
 
+test("Service Worker navigation is network-first even when an old shell is cached", async () => {
+  let cacheReads = 0;
+  const listeners = await loadServiceWorker({
+    fetchImpl: async () => new Response("fresh landing", { status: 200 }),
+    cacheMatch: async () => {
+      cacheReads += 1;
+      return new Response("stale Runtime shell", { status: 200 });
+    },
+  });
+  const request = {
+    method: "GET",
+    url: "https://peterguy326.github.io/senior-architect-pass-coach/",
+    mode: "navigate",
+    cache: "default",
+    headers: new Headers(),
+  };
+  const event = dispatchFetch(listeners.get("fetch"), request);
+  assert.equal(await (await event.responsePromise).text(), "fresh landing");
+  await Promise.all(event.lifetime);
+  assert.equal(cacheReads, 0);
+});
+
 test("Service Worker activation deletes only older caches owned by this Page", async () => {
   const deleted = [];
   const listeners = await loadServiceWorker({
     cacheNames: [
-      "architect-pass-coach-pages-v21",
+      "architect-pass-coach-pages-v22",
       "architect-pass-coach-pages-v18",
       "other-github-pages-project-v9",
     ],
@@ -109,6 +139,48 @@ test("Service Worker activation deletes only older caches owned by this Page", a
   assert.deepEqual(deleted, ["architect-pass-coach-pages-v18"]);
 });
 
+test("Service Worker reloads old controlled windows once after the v21 migration", async () => {
+  const navigations = [];
+  const listeners = await loadServiceWorker({
+    cacheNames: ["architect-pass-coach-pages-v21", "architect-pass-coach-pages-v22"],
+    windowClients: [
+      {
+        url: "https://peterguy326.github.io/senior-architect-pass-coach/today",
+        navigate: async (url) => { navigations.push(["coach", url]); },
+      },
+      {
+        url: "https://peterguy326.github.io/another-project/",
+        navigate: async (url) => { navigations.push(["other", url]); },
+      },
+    ],
+  });
+  const lifetime = [];
+  listeners.get("activate")({
+    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
+  });
+  await Promise.all(lifetime);
+
+  assert.deepEqual(navigations, [[
+    "coach",
+    "https://peterguy326.github.io/senior-architect-pass-coach/",
+  ]]);
+});
+
+test("Service Worker does not reload current v22 windows on a normal activation", async () => {
+  let navigations = 0;
+  const listeners = await loadServiceWorker({
+    cacheNames: ["architect-pass-coach-pages-v22"],
+    windowClients: [{ navigate: async () => { navigations += 1; } }],
+  });
+  const lifetime = [];
+  listeners.get("activate")({
+    waitUntil(value) { lifetime.push(Promise.resolve(value)); },
+  });
+  await Promise.all(lifetime);
+
+  assert.equal(navigations, 0);
+});
+
 test("Service Worker cache write failures never replace a successful network response", async () => {
   const networkResponse = new Response("fresh", { status: 200 });
   const listeners = await loadServiceWorker({
@@ -117,7 +189,7 @@ test("Service Worker cache write failures never replace a successful network res
   });
   const event = dispatchFetch(
     listeners.get("fetch"),
-    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/app.mjs"),
+    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/landing.mjs"),
   );
   assert.equal(await (await event.responsePromise).text(), "fresh");
   await assert.doesNotReject(Promise.all(event.lifetime));
@@ -169,12 +241,12 @@ test("Service Worker serves an exact cached response when the network is offline
   const listeners = await loadServiceWorker({
     fetchImpl: async () => { throw new TypeError("offline"); },
     cacheMatch: async (request) => (
-      typeof request !== "string" && request.url.endsWith("/src/app.mjs") ? cached : null
+      typeof request !== "string" && request.url.endsWith("/src/landing.mjs") ? cached : null
     ),
   });
   const event = dispatchFetch(
     listeners.get("fetch"),
-    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/app.mjs"),
+    new Request("https://peterguy326.github.io/senior-architect-pass-coach/src/landing.mjs"),
   );
   assert.equal(await (await event.responsePromise).text(), "cached asset");
   await assert.doesNotReject(Promise.all(event.lifetime));

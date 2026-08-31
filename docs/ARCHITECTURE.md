@@ -1,5 +1,10 @@
 # 架构与信任边界
 
+> [!IMPORTANT]
+> 本文记录已停止推荐的 GitHub Pages + Local Agent Runtime 历史架构。当前产品入口是用户正在使用的本地 Agent；题库、进度协议和可选考试页统一位于 [`senior-software-architect-review`](https://github.com/PeterGuy326/senior-software-architect-review)。
+
+以下各节均使用当时实现的术语与时态，仅供审计，不是当前操作说明。
+
 产品只有一个考生主入口：GitHub Pages 上的静态私教界面。Page 不是独立 Chatbot；只有连接 Local Agent Runtime 并选择一个实际可用的本机 Agent 后，才会恢复或创建档案并开放出题、判分、进度与对话。Runtime 是 loopback 配对与执行桥，不是第二个学习站点。面向开发者和未来连接器的本地 Node CLI Conversation Harness 是另一种集成接口。它们共享 45/52、每日最多 3 项、三态判分和答案门规则；当前不是多用户在线平台。
 
 ## 组件
