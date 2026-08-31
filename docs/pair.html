@@ -4,36 +4,30 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#123b5d">
     <meta name="referrer" content="no-referrer">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      content="default-src 'self'; script-src 'none'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     >
-    <title>连接本机 Agent · 架构过线私塾</title>
-    <style>
-      :root { color: #17213f; background: #f3eddf; font: 16px/1.7 system-ui, sans-serif; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
-      main { box-sizing: border-box; width: min(440px, calc(100% - 32px)); padding: 32px; background: #fffdf7; border: 1px solid #cdbf9f; box-shadow: 0 18px 60px #17213f24; }
-      .seal { display: grid; place-items: center; width: 52px; height: 52px; color: #fff; background: #a33b2e; font: 700 28px serif; }
-      h1 { margin: 20px 0 8px; font: 700 28px/1.25 serif; }
-      p { margin: 10px 0; }
-      .boundary { padding: 12px 14px; background: #f7f1e6; border-left: 3px solid #a33b2e; }
-      button { width: 100%; margin-top: 20px; padding: 13px 18px; border: 0; color: #fff; background: #17213f; font: inherit; font-weight: 700; cursor: pointer; }
-      button:disabled { cursor: wait; opacity: .6; }
-      #pair-status[data-state="error"] { color: #9b2f26; }
-    </style>
-    <script type="module" src="./src/pair.mjs"></script>
+    <meta name="robots" content="noindex">
+    <title>连接页已停用 · 系统架构设计师过线私教</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20fill=%22%23123b5d%22/%3E%3Ccircle%20cx=%2232%22%20cy=%2232%22%20r=%2222%22%20fill=%22none%22%20stroke=%22%23f2c66d%22%20stroke-width=%222%22/%3E%3Ctext%20x=%2232%22%20y=%2243%22%20text-anchor=%22middle%22%20font-size=%2230%22%20fill=%22%23fffaf0%22%3E%E8%BF%87%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./assets/landing.css">
   </head>
-  <body>
-    <main>
-      <div class="seal" aria-hidden="true">架</div>
-      <h1>允许网页连接本机 Agent？</h1>
-      <p>你正在把本机 Digital Employee Runtime 授权给“架构过线私塾”公开页面。</p>
-      <p class="boundary">
-        授权只在本次页面内存中有效。网页可以读取可用 Agent 并请求讲解，但不能让模型直接修改你的学习进度。
+  <body class="retired-page">
+    <main class="retired-card">
+      <span class="brand__seal" aria-hidden="true">止</span>
+      <p class="folio">RETIRED ENDPOINT</p>
+      <h1>这个连接页已经停用。</h1>
+      <p>
+        现在不需要下载或连接 Local Agent Runtime。请直接用你正在使用的本地 Agent 打开复习仓库；
+        需要模拟考试时，由同一个 Agent 启动仓库内的本地考试页面。
       </p>
-      <button id="pair-approve" type="button">允许并返回私教页面</button>
-      <p id="pair-status" role="status" aria-live="polite">等待你的确认。</p>
+      <div class="legal-actions">
+        <a class="button button--primary" href="https://github.com/PeterGuy326/senior-software-architect-review" rel="noreferrer">打开复习仓库</a>
+        <a class="button button--quiet" href="./">返回首页</a>
+      </div>
     </main>
   </body>
 </html>

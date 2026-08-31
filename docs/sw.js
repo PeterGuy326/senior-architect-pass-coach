@@ -1,29 +1,10 @@
-const CACHE_NAME = "architect-pass-coach-pages-v21";
+const CACHE_NAME = "architect-pass-coach-pages-v22";
 const CACHE_PREFIX = "architect-pass-coach-pages-";
 const CORE_ASSETS = Object.freeze([
   "./",
   "./index.html",
-  "./privacy.html",
-  "./pair.html",
-  "./assets/app.css",
-  "./assets/engine-codex.svg",
-  "./assets/engine-qoder.svg",
-  "./src/app.mjs",
-  "./src/chat-view.mjs",
-  "./src/harness-actions.mjs",
-  "./src/harness-action-router.mjs",
-  "./src/dialog-interaction.mjs",
-  "./src/local-agent-gate.mjs",
-  "./src/harness.mjs",
-  "./src/local-agent-client.mjs",
-  "./src/pair.mjs",
-  "./src/indexeddb-store.mjs",
-  "./src/progress-rules.mjs",
-  "./src/response-behavior.mjs",
-  "./src/content-worker.mjs",
-  "./src/github-content.mjs",
-  "./src/objective-parser.mjs",
-  "./data/curriculum.json",
+  "./assets/landing.css",
+  "./src/landing.mjs",
   "./manifest.webmanifest",
 ]);
 
@@ -36,14 +17,31 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  let foundLegacyCache = false;
   event.waitUntil(
     caches.keys()
-      .then((names) => Promise.all(
-        names
-          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
-          .map((name) => caches.delete(name)),
-      ))
-      .then(() => self.clients.claim()),
+      .then((names) => {
+        const legacyNames = names
+          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME);
+        foundLegacyCache = legacyNames.length > 0;
+        return Promise.all(legacyNames.map((name) => caches.delete(name)));
+      })
+      .then(() => self.clients.claim())
+      .then(() => (foundLegacyCache
+        ? self.clients.matchAll({ type: "window" })
+        : []))
+      .then((clients) => clients.filter((client) => {
+        try {
+          return new URL(client.url).href.startsWith(self.registration.scope);
+        } catch {
+          return false;
+        }
+      }))
+      .then((clients) => Promise.all(clients.map(async (client) => {
+        try {
+          await client.navigate(self.registration.scope);
+        } catch { /* the window may close during activation */ }
+      }))),
   );
 });
 
@@ -87,6 +85,11 @@ self.addEventListener("fetch", (event) => {
   };
 
   event.respondWith((async () => {
+    if (request.mode === "navigate") {
+      const response = await refresh();
+      if (response) return response;
+      return caches.match("./index.html");
+    }
     const cached = request.cache !== "no-store" ? await caches.match(request) : null;
     if (cached) {
       event.waitUntil(refresh());
@@ -94,7 +97,6 @@ self.addEventListener("fetch", (event) => {
     }
     const response = await refresh();
     if (response) return response;
-    if (request.mode === "navigate") return caches.match("./index.html");
     throw new Error("OFFLINE_ASSET_UNAVAILABLE");
   })());
 });

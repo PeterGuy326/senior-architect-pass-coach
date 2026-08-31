@@ -2,7 +2,7 @@
   "name": "senior-architect-pass-coach",
   "version": "0.7.0",
   "private": true,
-  "description": "系统架构设计师过线私教的本地 Workbench 与数字员工包",
+  "description": "系统架构设计师过线私教的 Agent-first 入口与历史 Workbench 实现",
   "type": "module",
   "bin": {
     "architect-pass-coach": "service/cli.mjs",

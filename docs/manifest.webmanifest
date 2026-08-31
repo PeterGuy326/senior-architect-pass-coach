@@ -1,14 +1,14 @@
 {
-  "name": "架构过线私塾",
+  "name": "系统架构设计师过线私教",
   "short_name": "过线私教",
-  "description": "连接本机 Agent 的系统架构设计师过线私教；档案、判分和进度保存在浏览器本地。",
+  "description": "用你正在使用的本地 Agent 打开复习仓库；网页只提供开始说明。",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#f4ecd9",
-  "theme_color": "#17213f",
+  "background_color": "#f4f0e7",
+  "theme_color": "#123b5d",
   "categories": ["education", "productivity"]
 }

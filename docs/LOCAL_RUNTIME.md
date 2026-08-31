@@ -1,8 +1,13 @@
 # Local Agent Runtime 使用说明
 
+> [!IMPORTANT]
+> Local Agent Runtime 已停止作为推荐产品入口，也不再自动构建新的 Release。本文仅保留作历史审计；当前请直接用本地 Agent 打开 [`senior-software-architect-review`](https://github.com/PeterGuy326/senior-software-architect-review)。
+
+以下步骤只描述旧预览版，**请勿按本文下载或启动 Runtime**。
+
 Local Agent Runtime 是“架构过线私教”的本机配对与 Agent 执行桥。考生始终在 [GitHub Pages](https://peterguy326.github.io/senior-architect-pass-coach/) 学习；Runtime 不建立第二个学习入口，也不保存第二份档案。学习档案、可信判分和进度仍由该 Pages Origin 的浏览器 Harness 写入，Digital Employee `0.3.0` 只负责运行用户明确选择且通过检查的 Agent。
 
-## 考生使用
+## 历史考生流程（已停用）
 
 1. 从 [v0.7.0-preview.2 Release](https://github.com/PeterGuy326/senior-architect-pass-coach/releases/tag/runtime-v0.7.0-preview.2) 下载系统对应的预览包；需要核验下载完整性时，对照同一 Release 的 `SHA256SUMS`。
 2. macOS 解压并打开 `Senior Architect Pass Coach.app`；Linux x64（glibc 2.28+，不适用于 Alpine/musl）解压并运行 `start-local-coach`。

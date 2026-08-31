@@ -1,6 +1,21 @@
 # 隐私边界
 
-## 默认不收集
+> **当前状态（自 2026-08-31 起）**：GitHub Pages 只提供 Agent-first 使用说明，不再建档、出题、判分、连接 Runtime 或保存学习进度。当前私人数据默认只写入复习仓库中被 Git 忽略的 `.study/`；完整公开说明见 [`privacy.html`](privacy.html)。
+
+## 当前 Agent-first 边界
+
+- Pages 没有账号、遥测、广告、模型代理或 API Key 表单，只加载少量同源静态文件。
+- 用户直接用自己选择的本地 Agent 打开 [`senior-software-architect-review`](https://github.com/PeterGuy326/senior-software-architect-review)。
+- 私人档案、作答、错题、项目素材与会话记录默认只在本机 `.study/`；不得写入公开仓库、Issue 或 Pull Request。
+- 本地考试页由复习仓库内的 loopback 服务提供，交卷证据仍写回 `.study/`，不经过本 Pages。
+- Agent 是否调用外部模型以及模型如何处理上下文，取决于用户选择的 Agent、账号与本机配置。
+- 旧 Pages IndexedDB 档案不会被当前首页读取、迁移或更新；需要删除时可使用浏览器的网站数据设置。
+
+## 历史浏览器 + Runtime 实现（已停用）
+
+以下内容仅记录 `v0.7.0` 预览方案的安全设计，供代码审计与复盘，不是当前使用说明。
+
+### 当时的默认不收集
 
 当前版本没有遥测、云端账号或项目自建的云端学习接口。Pages 不提供 `content-only` 浏览器 Chatbot；只有用户显式连接 Runtime 并选择实际可用的本机 Agent 后，才会恢复或创建档案并开放学习流程。任务安排、固定判分与进度写入仍在浏览器内完成。浏览器会从 `raw.githubusercontent.com` 读取固定 commit 的公开题库文件，因此 GitHub 作为内容托管方会看到普通网络请求元数据（例如 IP、User-Agent）；请求不携带私人档案、作答或学习进度，也不使用 GitHub API。
 
@@ -26,7 +41,7 @@ GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的
 
 `npm install` 会连接用户配置的 npm registry；这属于依赖安装，不是学习数据上传。`validate-package` 和 `eval-package` 本身离线运行，不调用模型。
 
-## CLI 私人数据位置
+### 当时的 CLI 私人数据位置
 
 私人档案默认位于操作系统用户数据目录。CLI 会拒绝任何位于本代码仓库内的 `--data-dir`，避免个人数据被误提交、打包或发布。
 
@@ -34,7 +49,7 @@ GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的
 
 会话快照保存公开题面、只含摘要的内容引用、状态和提交后已经展示的反馈（其中可含参考答案与解析），用于恢复；禁止持久化原始 `response`、密封答案 bundle 和 `trustedAuthorization`。中断判题只保存 attempt key 与阶段，不保存作答正文。所有会话文件均为 owner-only，且不会写入 Git 仓库。
 
-## 去标识化快照
+### 当时的去标识化快照
 
 允许进入员工包的快照采用字段白名单，只包含：
 
@@ -44,10 +59,10 @@ GitHub Pages 与 Runtime 确认页是不同 Origin，浏览器会隔离两边的
 
 禁止字段包括用户 ID、姓名、邮箱、背景自由文本、本地目录、资料路径和原始状态文档。资料标题和自由文本推荐理由也不进入快照。
 
-## 匿名边界
+### 当时的匿名边界
 
 没有本地授权上下文时，只能做不读取个人状态的通用诊断。匿名结果必须是 general scope，且 `proposed_progress_events` 必须为空。
 
-## 删除数据
+### 当时的删除数据
 
 当前没有云端副本。连接 Agent 后，网页用户可点击“清除本机数据”；即使 Runtime 不可用，也始终可以通过浏览器的网站数据设置删除该 Origin 的 IndexedDB 与缓存。CLI 用户可以在停止 CLI 后删除自己的用户数据目录。删除前如需保留网页进度，应先主动导出档案。代码仓库不包含可用于恢复私人状态的副本。
